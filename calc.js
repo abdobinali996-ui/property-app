@@ -91,6 +91,21 @@ function contractSummary(contract, payments, asOf) {
   };
 }
 
+// معلومات القسط لدفعة معيّنة: ترتيبها بين دفعات العقد (حسب رقم السند)،
+// وإجمالي عدد أقساط العقد إن كان له تاريخ نهاية (وإلا null)
+function installmentInfo(contract, payments, paymentId) {
+  const sorted = [...(payments || [])].sort((a, b) =>
+    ((a.receipt_no || 0) - (b.receipt_no || 0)) || ((a.id || 0) - (b.id || 0)));
+  const idx = sorted.findIndex((p) => Number(p.id) === Number(paymentId));
+  const index = idx >= 0 ? idx + 1 : sorted.length;
+  let total = null;
+  if (contract && contract.end_date) {
+    const n = periodStarts(contract, toDate(contract.end_date)).length;
+    total = n > 0 ? n : null;
+  }
+  return { installment_index: index, installment_total: total };
+}
+
 // المستحق خلال شهر معيّن (فترات تبدأ داخل ذلك الشهر)
 function dueInMonth(contract, year, month) {
   const rent = Number(contract.rent_amount) || 0;
@@ -101,4 +116,4 @@ function dueInMonth(contract, year, month) {
   return inMonth.length * rent;
 }
 
-module.exports = { CYCLE_MONTHS, CYCLE_LABELS, toDate, fmtDate, addMonths, today, periodStarts, contractSummary, dueInMonth };
+module.exports = { CYCLE_MONTHS, CYCLE_LABELS, toDate, fmtDate, addMonths, today, periodStarts, contractSummary, dueInMonth, installmentInfo };

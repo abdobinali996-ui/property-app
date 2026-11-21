@@ -132,12 +132,126 @@ app.get('/api/payments/:id/receipt', auth, async (req, res) => {
     const property = unit ? await db.get('properties', unit.property_id) : null;
     const allPays = (await db.list('payments')).filter((p) => p.contract_id === payment.contract_id);
     const summary = contract ? calc.contractSummary(contract, allPays) : null;
+    const installment = contract ? calc.installmentInfo(contract, allPays, payment.id) : null;
     res.json({
       receipt_no: payment.receipt_no,
       payment: { ...payment, payment_date: calc.fmtDate(payment.payment_date) },
       tenant, unit, property,
       contract: contract ? { ...contract, start_date: calc.fmtDate(contract.start_date), end_date: calc.fmtDate(contract.end_date) || null } : null,
       summary,
+      installment,
+      settings: await db.getSettings(),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// بيانات سند صرف كاملة للطباعة
+app.get('/api/expenses/:id/voucher', auth, async (req, res) => {
+  try {
+    const expense = await db.get('expenses', req.params.id);
+    if (!expense) return res.status(404).json({ error: 'غير موجود' });
+    const property = expense.property_id ? await db.get('properties', expense.property_id) : null;
+    const unit = expense.unit_id ? await db.get('units', expense.unit_id) : null;
+    res.json({
+      voucher_no: expense.voucher_no,
+      expense: { ...expense, expense_date: calc.fmtDate(expense.expense_date) },
+      property, unit,
+      settings: await db.getSettings(),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------- إعدادات المؤسسة ----------
+app.get('/api/settings', auth, async (req, res) => {
+  try { res.json(await db.getSettings()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/settings', auth, async (req, res) => {
+  try { res.json(await db.setSettings(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ---------- المرفقات ----------
+app.get('/api/attachments', auth, async (req, res) => {
+  try {
+    const { entity_type, entity_id } = req.query;
+    if (!entity_type || !entity_id) return res.status(400).json({ error: 'حدد الكيان المطلوب' });
+    res.json(await db.listAttachments(entity_type, Number(entity_id)));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/attachments', auth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!db.ATTACHMENT_TYPES.includes(b.entity_type)) return res.status(400).json({ error: 'نوع كيان غير صالح' });
+    if (!db.ATTACHMENT_MIMES.includes(b.mime)) return res.status(400).json({ error: 'يسمح فقط بملفات الصور أو PDF' });
+    if (!b.entity_id || !b.data_base64) return res.status(400).json({ error: 'بيانات الملف ناقصة' });
+    const buf = Buffer.from(String(b.data_base64), 'base64');
+    if (!buf.length) return res.status(400).json({ error: 'ملف فارغ' });
+    if (buf.length > db.ATTACHMENT_MAX) return res.status(400).json({ error: 'حجم الملف يتجاوز 3 ميجابايت' });
+    const row = await db.insertAttachment({
+      entity_type: b.entity_type, entity_id: Number(b.entity_id),
+      filename: String(b.filename || 'ملف'), mime: b.mime,
+      size: buf.length, data_base64: String(b.data_base64),
+    });
+    res.status(201).json(row);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/attachments/:id/download', auth, async (req, res) => {
+  try {
+    const a = await db.getAttachment(req.params.id);
+    if (!a) return res.status(404).json({ error: 'غير موجود' });
+    const buf = Buffer.from(a.data_base64, 'base64');
+    res.setHeader('Content-Type', a.mime);
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(a.filename || 'file')}`);
+    res.send(buf);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/attachments/:id', auth, async (req, res) => {
+  try { await db.removeAttachment(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------- كشف حساب مستأجر (لعقد واحد) ----------
+app.get('/api/contracts/:id/statement', auth, async (req, res) => {
+  try {
+    const contract = await db.get('contracts', req.params.id);
+    if (!contract) return res.status(404).json({ error: 'غير موجود' });
+    const [tenant, unit, payments] = await Promise.all([
+      db.get('tenants', contract.tenant_id), db.get('units', contract.unit_id), db.list('payments'),
+    ]);
+    const property = unit ? await db.get('properties', unit.property_id) : null;
+    const cps = payments.filter((p) => p.contract_id === contract.id);
+    const summary = calc.contractSummary(contract, cps);
+    const rent = Number(contract.rent_amount) || 0;
+    // الأقساط المستحقة: حتى نهاية العقد إن وُجدت، وإلا حتى اليوم
+    const limit = contract.end_date ? calc.toDate(contract.end_date) : calc.today();
+    const starts = calc.periodStarts(contract, limit);
+    const events = [];
+    for (const s of starts) events.push({ date: calc.fmtDate(s), type: 'due', description: 'قسط مستحق', due: rent, paid: 0 });
+    for (const p of cps) {
+      events.push({
+        date: calc.fmtDate(p.payment_date), type: 'payment',
+        description: `دفعة — سند قبض رقم ${String(p.receipt_no).padStart(4, '0')}`,
+        due: 0, paid: Number(p.amount) || 0, receipt_no: p.receipt_no,
+      });
+    }
+    events.sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'due' ? -1 : 1));
+    let bal = 0;
+    const ledger = events.map((e) => {
+      bal = Math.round((bal + e.due - e.paid) * 100) / 100;
+      return { ...e, balance: bal };
+    });
+    const totalDue = starts.length * rent;
+    const totalPaid = cps.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    res.json({
+      tenant, unit, property,
+      contract: { ...contract, start_date: calc.fmtDate(contract.start_date), end_date: calc.fmtDate(contract.end_date) || null },
+      summary, ledger,
+      total_due: totalDue, total_paid: totalPaid,
+      remaining: Math.round((totalDue - totalPaid) * 100) / 100,
+      settings: await db.getSettings(),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -253,6 +367,7 @@ app.get('/api/properties/:id/statement', auth, async (req, res) => {
       income: incomeRows, expenses: expenseRows,
       total_income: totalIncome, total_expenses: totalExpenses,
       net: Math.round((totalIncome - totalExpenses) * 100) / 100,
+      settings: await db.getSettings(),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -315,8 +430,10 @@ function toCsv(rows) {
 app.get('/api/export/:table.csv', auth, async (req, res) => {
   try {
     const table = req.params.table;
-    if (!db.TABLES[table] && table !== 'contracts-full') return res.status(404).json({ error: 'جدول غير معروف' });
-    const rows = table === 'contracts-full' ? await enrichedContracts() : await db.list(table);
+    if (!db.TABLES[table] && table !== 'contracts-full' && table !== 'attachments') return res.status(404).json({ error: 'جدول غير معروف' });
+    const rows = table === 'contracts-full' ? await enrichedContracts()
+      : table === 'attachments' ? await db.listAttachmentsMeta()
+      : await db.list(table);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${table}.csv"`);
     res.send(toCsv(rows));
