@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام إدارة الأملاك العقارية</title>
+<meta name="theme-color" content="#0b5563">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- شاشة الدخول -->
+<div id="loginScreen" class="login-screen">
+  <form id="loginForm" class="login-card">
+    <div class="login-logo">🏢</div>
+    <h1>إدارة الأملاك العقارية</h1>
+    <p class="muted">نظام محاسبي لإدارة العقارات والإيجارات وسندات القبض</p>
+    <label>اسم المستخدم<input name="username" required autocomplete="username"></label>
+    <label>كلمة المرور<input name="password" type="password" required autocomplete="current-password"></label>
+    <button class="btn primary big" type="submit">دخول</button>
+    <p id="loginError" class="error"></p>
+  </form>
+</div>
+
+<!-- التطبيق -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand">🏢 إدارة الأملاك العقارية</div>
+    <div class="top-actions">
+      <button id="installBtn" class="btn ghost hidden">📲 تثبيت التطبيق</button>
+      <button id="logoutBtn" class="btn ghost">خروج</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-view="dashboard" class="active">لوحة المتابعة</button>
+    <button data-view="properties">العقارات</button>
+    <button data-view="units">الوحدات</button>
+    <button data-view="tenants">المستأجرون</button>
+    <button data-view="contracts">العقود</button>
+    <button data-view="payments">سندات القبض</button>
+    <button data-view="expenses">المصروفات</button>
+    <button data-view="statement">كشف المالك</button>
+    <button data-view="backup">التصدير والنسخ</button>
+  </nav>
+
+  <main id="main"></main>
+
+  <button id="quickReceipt" class="fab" title="إضافة سند قبض">+ سند قبض</button>
+</div>
+
+<!-- نافذة منبثقة عامة -->
+<div id="modalBackdrop" class="modal-backdrop hidden">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle"></h3>
+      <button id="modalClose" class="btn ghost">✕</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<!-- منطقة الطباعة -->
+<div id="printArea"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
