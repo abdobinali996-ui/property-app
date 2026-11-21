@@ -3,11 +3,11 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const db = require('./db');
-const calc = require('./lib/calc');
+const calc = require('./calc');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname)));
 
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'change-me-123';
@@ -342,7 +342,7 @@ app.post('/api/import', auth, async (req, res) => {
 
 // أي مسار آخر يعيد واجهة التطبيق
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
