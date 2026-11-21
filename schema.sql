@@ -40,14 +40,17 @@ CREATE TABLE IF NOT EXISTS contracts (
   tenant_id     INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   start_date    DATE NOT NULL,
   end_date      DATE,
-  rent_amount   NUMERIC(12,2) NOT NULL,
+  rent_amount   NUMERIC(12,2) NOT NULL,  -- إجمالي إيجار العقد لكامل مدته (لا قيمة القسط الواحد)
   cycle         TEXT NOT NULL DEFAULT 'monthly'
                 CHECK (cycle IN ('monthly','quarterly','semiannual','annual')),
+  installments_count INTEGER,  -- عدد الدفعات (اختياري: يُستنتج من المدة إن تُرك فارغاً)
   deposit       NUMERIC(12,2) DEFAULT 0,
   status        TEXT NOT NULL DEFAULT 'active',  -- active / ended
   notes         TEXT DEFAULT '',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- للقواعد الموجودة مسبقاً: إضافة عمود عدد الدفعات
+ALTER TABLE contracts ADD COLUMN IF NOT EXISTS installments_count INTEGER;
 
 -- تسلسل أرقام سندات القبض
 CREATE SEQUENCE IF NOT EXISTS receipt_seq START 1;
@@ -98,7 +101,7 @@ ALTER TABLE expenses ALTER COLUMN voucher_no SET DEFAULT nextval('voucher_seq');
 
 -- إعدادات المؤسسة/المكتب (تظهر في ترويسة السندات والكشوف)
 CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,  -- company_name / company_address / company_phones / company_extra
+  key   TEXT PRIMARY KEY,  -- company_name / company_address / company_phones / company_extra / company_logo (رابط بيانات Base64)
   value TEXT DEFAULT ''
 );
 

@@ -165,9 +165,21 @@ app.get('/api/expenses/:id/voucher', auth, async (req, res) => {
 app.get('/api/settings', auth, async (req, res) => {
   try { res.json(await db.getSettings()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+const LOGO_MAX_BYTES = 700 * 1024;
 app.put('/api/settings', auth, async (req, res) => {
-  try { res.json(await db.setSettings(req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const body = req.body || {};
+    // التحقق من الشعار: صورة PNG/JPG/WebP كرابط بيانات (data URL) بحد أقصى 700 كيلوبايت
+    if (body.company_logo) {
+      const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\s]+)$/.exec(String(body.company_logo).trim());
+      if (!m) return res.status(400).json({ error: 'صيغة الشعار غير صالحة — يجب أن تكون صورة PNG أو JPG أو WebP' });
+      const size = Buffer.from(m[2].replace(/\s/g, ''), 'base64').length;
+      if (!size) return res.status(400).json({ error: 'ملف الشعار فارغ أو تالف' });
+      if (size > LOGO_MAX_BYTES) return res.status(400).json({ error: 'حجم الشعار يتجاوز الحد الأقصى (700 كيلوبايت)' });
+      body.company_logo = `data:${m[1]};base64,${m[2].replace(/\s/g, '')}`;
+    }
+    res.json(await db.setSettings(body));
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ---------- المرفقات ----------
@@ -224,12 +236,16 @@ app.get('/api/contracts/:id/statement', auth, async (req, res) => {
     const property = unit ? await db.get('properties', unit.property_id) : null;
     const cps = payments.filter((p) => p.contract_id === contract.id);
     const summary = calc.contractSummary(contract, cps);
-    const rent = Number(contract.rent_amount) || 0;
+    // مبالغ الأقساط الفردية: إجمالي الإيجار مقسوماً على عدد الدفعات
+    const amounts = calc.installmentAmounts(contract);
     // الأقساط المستحقة: حتى نهاية العقد إن وُجدت، وإلا حتى اليوم
     const limit = contract.end_date ? calc.toDate(contract.end_date) : calc.today();
     const starts = calc.periodStarts(contract, limit);
     const events = [];
-    for (const s of starts) events.push({ date: calc.fmtDate(s), type: 'due', description: 'قسط مستحق', due: rent, paid: 0 });
+    starts.forEach((s, i) => {
+      if (i >= amounts.length) return;
+      events.push({ date: calc.fmtDate(s), type: 'due', description: `قسط مستحق ${i + 1} من ${amounts.length}`, due: amounts[i], paid: 0 });
+    });
     for (const p of cps) {
       events.push({
         date: calc.fmtDate(p.payment_date), type: 'payment',
@@ -243,7 +259,7 @@ app.get('/api/contracts/:id/statement', auth, async (req, res) => {
       bal = Math.round((bal + e.due - e.paid) * 100) / 100;
       return { ...e, balance: bal };
     });
-    const totalDue = starts.length * rent;
+    const totalDue = calc.round2(events.reduce((s, e) => s + e.due, 0));
     const totalPaid = cps.reduce((s, p) => s + (Number(p.amount) || 0), 0);
     res.json({
       tenant, unit, property,

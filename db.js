@@ -8,7 +8,7 @@ const TABLES = {
   properties: ['name', 'address', 'owner_name', 'notes'],
   units: ['property_id', 'name', 'type', 'floor', 'default_rent', 'status', 'notes'],
   tenants: ['name', 'phone', 'id_number', 'email', 'notes'],
-  contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'deposit', 'status', 'notes'],
+  contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'installments_count', 'deposit', 'status', 'notes'],
   payments: ['contract_id', 'amount', 'payment_date', 'method', 'notes'],
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
@@ -18,7 +18,7 @@ const ATTACHMENT_TYPES = ['tenant', 'contract', 'payment', 'expense'];
 const ATTACHMENT_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'];
 const ATTACHMENT_MAX = 3 * 1024 * 1024;
 
-const SETTING_KEYS = ['company_name', 'company_address', 'company_phones', 'company_extra'];
+const SETTING_KEYS = ['company_name', 'company_address', 'company_phones', 'company_extra', 'company_logo'];
 
 const usePg = !!process.env.DATABASE_URL;
 let pool = null;
@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS contracts (
   start_date DATE NOT NULL, end_date DATE, rent_amount NUMERIC(12,2) NOT NULL,
   cycle TEXT NOT NULL DEFAULT 'monthly', deposit NUMERIC(12,2) DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active', notes TEXT DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE contracts ADD COLUMN IF NOT EXISTS installments_count INTEGER;
 CREATE SEQUENCE IF NOT EXISTS receipt_seq START 1;
 CREATE TABLE IF NOT EXISTS payments (
   id SERIAL PRIMARY KEY, contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
@@ -154,7 +155,15 @@ async function get(table, id) {
 function pick(table, obj) {
   const out = {};
   for (const col of TABLES[table]) {
-    if (obj[col] !== undefined) out[col] = obj[col] === '' && (col === 'end_date' || col === 'unit_id') ? null : obj[col];
+    if (obj[col] === undefined) continue;
+    let v = obj[col];
+    if (v === '' && (col === 'end_date' || col === 'unit_id' || col === 'installments_count')) v = null;
+    if (col === 'installments_count' && v !== null) {
+      v = Number(v);
+      if (!Number.isFinite(v) || v <= 0) v = null;
+      else v = Math.floor(v);
+    }
+    out[col] = v;
   }
   return out;
 }
@@ -170,8 +179,10 @@ async function insert(table, obj) {
     return rows[0];
   }
   const m = loadMem();
-  if (table === 'expenses' && (data.voucher_no === undefined || data.voucher_no === null)) {
-    data.voucher_no = ++m.voucher_seq;
+  if (table === 'expenses') {
+    if (data.voucher_no === undefined || data.voucher_no === null) data.voucher_no = ++m.voucher_seq;
+    if (data.payee === undefined) data.payee = '';
+    if (data.payment_method === undefined) data.payment_method = 'نقداً';
   }
   const row = { id: ++m.seq[table], created_at: new Date().toISOString(), ...data };
   m[table].push(row);
@@ -251,7 +262,7 @@ async function remove(table, id) {
 
 // ---------------- إعدادات المؤسسة ----------------
 async function getSettings() {
-  const out = { company_name: '', company_address: '', company_phones: '', company_extra: '' };
+  const out = { company_name: '', company_address: '', company_phones: '', company_extra: '', company_logo: '' };
   if (usePg) {
     const { rows } = await pool.query('SELECT key, value FROM settings');
     for (const r of rows) if (SETTING_KEYS.includes(r.key)) out[r.key] = r.value || '';

@@ -75,8 +75,11 @@ function tafqeet(amount) {
 
 // ---------------- ترويسة المؤسسة في المستندات المطبوعة ----------------
 function companyHeader(s) {
-  if (!s || (!s.company_name && !s.company_address && !s.company_phones && !s.company_extra)) return '';
+  if (!s) return '';
+  const logo = s.company_logo && String(s.company_logo).startsWith('data:image/') ? String(s.company_logo) : '';
+  if (!logo && !s.company_name && !s.company_address && !s.company_phones && !s.company_extra) return '';
   return `<div class="company-header">
+    ${logo ? `<img class="company-logo" src="${logo}" alt="">` : ''}
     ${s.company_name ? `<div class="company-name">${esc(s.company_name)}</div>` : ''}
     ${s.company_address ? `<div>${esc(s.company_address)}</div>` : ''}
     ${s.company_phones ? `<div>هاتف: ${esc(s.company_phones)}</div>` : ''}
@@ -247,6 +250,29 @@ function reminderMessage({ company, tenantName, amount, unitName }) {
     'نرجو التكرم بالسداد في أقرب وقت ممكن، وشاكرين لكم حسن تعاونكم.',
   ].join('\n');
 }
+function reminderMessageEn({ company, tenantName, amount, unitName, propertyName }) {
+  const from = company ? `greetings from ${company}.` : 'greetings from the property management office.';
+  const place = unitName
+    ? ` for unit ${unitName}${propertyName ? ` (${propertyName})` : ''}`
+    : (propertyName ? ` for ${propertyName}` : '');
+  return `Dear ${tenantName}, ${from} This is a kind reminder that an amount of ${amount} SAR is overdue${place}. We would appreciate payment at your earliest convenience. Thank you.`;
+}
+function reminderMessageUr({ company, tenantName, amount, unitName, propertyName }) {
+  const from = company ? `${company} کی جانب سے` : 'جائیداد انتظامیہ کی جانب سے';
+  const place = unitName
+    ? `یونٹ ${unitName}${propertyName ? ` (${propertyName})` : ''} کے کرایے کی مد میں`
+    : 'آپ کے ذمے کرایے کی مد میں';
+  return [
+    `محترم ${tenantName} صاحب، السلام علیکم ورحمۃ اللہ وبرکاتہ۔`,
+    `${from} اطلاع دی جاتی ہے کہ ${place} مبلغ ${amount} ریال واجب الادا ہے۔`,
+    'براہ کرم جلد از جلد ادائیگی کی زحمت فرمائیں۔ آپ کے تعاون کے ہم شکر گزار ہیں۔',
+  ].join('\n');
+}
+function reminderMessageFor(lang, slots) {
+  if (lang === 'en') return reminderMessageEn(slots);
+  if (lang === 'ur') return reminderMessageUr(slots);
+  return reminderMessage(slots);
+}
 function reminderLink(phone, message) {
   return `https://wa.me/${normalizePhone(phone)}?text=${encodeURIComponent(message)}`;
 }
@@ -260,25 +286,43 @@ function reminderBtn(tenantId, arrears) {
 function paymentReminder(tenantId, arrears) {
   const t = CACHE.tenants.find((x) => x.id === Number(tenantId));
   if (!t || !t.phone) return;
-  const unitNames = CACHE.contracts.filter((c) => c.tenant_id === t.id).map((c) => c.unit_name).filter(Boolean);
-  const msg = reminderMessage({
+  const tContracts = CACHE.contracts.filter((c) => c.tenant_id === t.id);
+  const unitNames = tContracts.map((c) => c.unit_name).filter(Boolean);
+  const propNames = [...new Set(tContracts.map((c) => c.property_name).filter(Boolean))];
+  const slots = {
     company: (CACHE.settings || {}).company_name || '',
     tenantName: t.name,
     amount: Number(arrears || 0).toLocaleString('en-US'),
     unitName: unitNames.join('، '),
-  });
+    propertyName: propNames.join('، '),
+  };
+  let currentMsg = reminderMessageFor('ar', slots);
   openModal('تذكير بالدفع عبر واتساب', `
     <p class="muted">راجع الرسالة ثم افتح واتساب لإرسالها إلى ${esc(t.name)} (${esc(t.phone)}):</p>
-    <div class="amount-words" style="white-space:pre-wrap">${esc(msg)}</div>
+    <label>لغة الرسالة<select id="reminderLang">
+      <option value="ar" selected>العربية</option>
+      <option value="en">English</option>
+      <option value="ur">اردو</option>
+    </select></label>
+    <div class="amount-words" id="reminderText" style="white-space:pre-wrap">${esc(currentMsg)}</div>
     <div class="form-actions">
-      <a class="btn primary" style="text-align:center;text-decoration:none;line-height:2" href="${reminderLink(t.phone, msg)}" target="_blank" rel="noopener">💬 فتح واتساب</a>
+      <a class="btn primary" id="reminderWa" style="text-align:center;text-decoration:none;line-height:2" href="${reminderLink(t.phone, currentMsg)}" target="_blank" rel="noopener">💬 فتح واتساب</a>
       <button class="btn" id="copyReminder" type="button">📋 نسخ الرسالة</button>
     </div>
     <p class="error" id="copyMsg"></p>`);
+  $('#reminderLang').addEventListener('change', (e) => {
+    const lang = e.target.value;
+    currentMsg = reminderMessageFor(lang, slots);
+    const box = $('#reminderText');
+    box.textContent = currentMsg;
+    box.dir = lang === 'en' ? 'ltr' : 'rtl';
+    box.style.textAlign = lang === 'en' ? 'left' : '';
+    $('#reminderWa').href = reminderLink(t.phone, currentMsg);
+  });
   $('#copyReminder').addEventListener('click', async () => {
     const out = $('#copyMsg');
     try {
-      await navigator.clipboard.writeText(msg);
+      await navigator.clipboard.writeText(currentMsg);
       out.style.color = 'var(--ok)';
       out.textContent = 'تم نسخ الرسالة ✅ الصقها في أي محادثة.';
     } catch (_) {
@@ -389,7 +433,7 @@ async function tenantProfile(id) {
     </div>
     <h4>العقود</h4>
     ${p.contracts.length ? p.contracts.map((c) => `<div class="card" style="margin-bottom:6px">
-      <strong>${esc(c.unit_name)}</strong> — ${esc(c.property_name)} · ${money(c.rent_amount)} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})<br>
+      <strong>${esc(c.unit_name)}</strong> — ${esc(c.property_name)} · إجمالي الإيجار: ${money(c.rent_amount)} · القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})<br>
       <span class="muted">من ${esc(c.start_date)} ${c.end_date ? 'إلى ' + esc(c.end_date) : ''}</span><br>
       المدفوع: ${money(c.total_paid)} · المستحق: ${money(c.total_due)} · المتأخرات: <span class="${c.arrears > 0 ? 'arrears' : ''}">${money(c.arrears)}</span>
       <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn small primary" onclick="closeModal();paymentForm(${c.id})">+ سند قبض لهذا العقد</button>
@@ -415,7 +459,7 @@ async function viewContracts() {
       <div class="section-head"><h3>العقود</h3><button class="btn primary" onclick="contractForm()">+ إضافة عقد</button></div>
       ${CACHE.contracts.length ? `<div class="table-wrap"><table><tr><th>المستأجر</th><th>الوحدة</th><th>الإيجار</th><th>الفترة</th><th>المدفوع</th><th>المستحق</th><th>المتأخرات</th><th>الحالة</th><th></th></tr>
         ${CACHE.contracts.map((c) => `<tr><td><strong>${esc(c.tenant_name)}</strong></td><td>${esc(c.unit_name)} — ${esc(c.property_name)}</td>
-          <td>${money(c.rent_amount)}<br><span class="muted">${esc(CYCLE_LABELS[c.cycle] || c.cycle)}</span></td>
+          <td>${money(c.rent_amount)} <span class="muted">(إجمالي العقد)</span><br><span class="muted">القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</span></td>
           <td>${esc(c.start_date)}<br><span class="muted">${c.end_date ? 'إلى ' + esc(c.end_date) : 'مفتوح'}</span></td>
           <td class="money">${money(c.total_paid)}</td><td>${money(c.total_due)}</td>
           <td class="${c.arrears > 0 ? 'arrears' : ''}">${money(c.arrears)}</td>
@@ -429,6 +473,25 @@ async function viewContracts() {
       : '<p class="muted">لا توجد عقود بعد.</p>'}
     </div>`;
 }
+// حساب عدد الدفعات من التواريخ والدورة في نموذج العقد (نفس منطق الخادم)
+const CYCLE_MONTHS_F = { monthly: 1, quarterly: 3, semiannual: 6, annual: 12 };
+const CYCLE_YEAR_COUNT_F = { monthly: 12, quarterly: 4, semiannual: 2, annual: 1 };
+function addMonthsStr(dateStr, n) {
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  const target = new Date(y, (m || 1) - 1 + n, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(d || 1, lastDay));
+  const p = (x) => String(x).padStart(2, '0');
+  return `${target.getFullYear()}-${p(target.getMonth() + 1)}-${p(target.getDate())}`;
+}
+function periodCountStr(startStr, endStr, cycle) {
+  if (!startStr || !endStr || endStr < startStr) return 0;
+  const step = CYCLE_MONTHS_F[cycle] || 1;
+  let cur = startStr, count = 0;
+  while (cur <= endStr && count < 1200) { count++; cur = addMonthsStr(cur, step); }
+  return count;
+}
+
 function contractForm(id) {
   const c = id ? CACHE.contracts.find((x) => x.id === id) : {};
   formModal(id ? 'تعديل عقد' : 'إضافة عقد', `
@@ -436,18 +499,49 @@ function contractForm(id) {
     <label>المستأجر *<select name="tenant_id" required>${CACHE.tenants.map((t) => `<option value="${t.id}" ${c.tenant_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
     <label>تاريخ البداية *<input name="start_date" type="date" required value="${esc(c.start_date || todayStr())}"></label>
     <label>تاريخ النهاية (اختياري)<input name="end_date" type="date" value="${esc(c.end_date || '')}"></label>
-    <label>قيمة الإيجار للدورة (ر.س) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
+    <label>إجمالي إيجار العقد (لكامل المدة) (ر.س) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
     <label>دورة السداد<select name="cycle">${Object.entries(CYCLE_LABELS).map(([v, l]) => `<option value="${v}" ${c.cycle === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label>عدد الدفعات (الأقساط)<input name="installments_count" type="number" step="1" min="1" value="${c.installments_count ?? ''}" placeholder="يُحسب تلقائياً من المدة"></label>
+    <p class="muted" id="ctHint" style="margin:-4px 0 10px"></p>
     <label>التأمين (ر.س)<input name="deposit" type="number" step="0.01" min="0" value="${c.deposit ?? 0}"></label>
     <label>الحالة<select name="status"><option value="active" ${c.status === 'active' ? 'selected' : ''}>سارٍ</option><option value="ended" ${c.status === 'ended' ? 'selected' : ''}>منتهٍ</option></select></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(c.notes || '')}</textarea></label>`,
     async (data) => {
       data.unit_id = Number(data.unit_id); data.tenant_id = Number(data.tenant_id);
       data.rent_amount = Number(data.rent_amount); data.deposit = Number(data.deposit || 0);
+      data.installments_count = data.installments_count ? Number(data.installments_count) : null;
       if (!data.end_date) data.end_date = null;
       id ? await api(`/api/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) }) : await api('/api/contracts', { method: 'POST', body: JSON.stringify(data) });
       render();
     });
+  // تعبئة عدد الدفعات تلقائياً من التواريخ والدورة (قابلة للتجاوز اليدوي) + تلميح حي لقيمة الدفعة
+  const form = document.getElementById('modalForm');
+  if (form) {
+    const startEl = form.elements.start_date, endEl = form.elements.end_date,
+      cycleEl = form.elements.cycle, rentEl = form.elements.rent_amount,
+      countEl = form.elements.installments_count, hintEl = document.getElementById('ctHint');
+    const autoCount = () => {
+      const n = periodCountStr(startEl.value, endEl.value, cycleEl.value);
+      return n > 0 ? n : (CYCLE_YEAR_COUNT_F[cycleEl.value] || 12);
+    };
+    let countTouched = c.installments_count != null && Number(c.installments_count) !== autoCount();
+    if (!countEl.value) countEl.value = autoCount();
+    const refreshHint = () => {
+      const total = Number(rentEl.value) || 0;
+      let n = parseInt(countEl.value, 10);
+      if (!n || n < 1) n = autoCount();
+      const base = Math.round((total / n) * 100) / 100;
+      const last = Math.round((total - base * (n - 1)) * 100) / 100;
+      hintEl.textContent = total > 0
+        ? `قيمة الدفعة الواحدة: ${money(base)}${last !== base ? ` (الدفعة الأخيرة: ${money(last)})` : ''} — على ${n} دفعة`
+        : 'أدخل إجمالي الإيجار لعرض قيمة الدفعة الواحدة.';
+    };
+    const onDates = () => { if (!countTouched) countEl.value = autoCount(); refreshHint(); };
+    [startEl, endEl, cycleEl].forEach((el) => el.addEventListener('change', onDates));
+    rentEl.addEventListener('input', refreshHint);
+    countEl.addEventListener('input', () => { countTouched = true; refreshHint(); });
+    refreshHint();
+  }
 }
 
 // ---------------- سندات القبض والدفعات ----------------
@@ -491,7 +585,7 @@ async function paymentForm(contractId, presetAmount) {
     <label>العقد (المستأجر — الوحدة) *<select name="contract_id" id="payContract">${active.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.tenant_name)} — ${esc(c.unit_name)} (${esc(c.property_name)})</option>`).join('')}</select></label>
     <div class="chips">
       <button type="button" class="chip" onclick="setPayAmount(${c0 ? c0.arrears : 0})">سداد المتأخرات: ${money(c0 ? c0.arrears : 0)}</button>
-      <button type="button" class="chip" onclick="setPayAmount(${c0 ? c0.rent_amount : 0})">إيجار دورة: ${money(c0 ? c0.rent_amount : 0)}</button>
+      <button type="button" class="chip" onclick="setPayAmount(${c0 ? (c0.installment_amount ?? c0.rent_amount) : 0})">قيمة قسط واحد: ${money(c0 ? (c0.installment_amount ?? c0.rent_amount) : 0)}</button>
     </div>
     <label>المبلغ (ر.س) *<input name="amount" id="payAmount" type="number" step="0.01" min="0.01" required value="${presetAmount ?? ''}"></label>
     <label>تاريخ الدفع<input name="payment_date" type="date" value="${todayStr()}"></label>
@@ -519,9 +613,9 @@ async function showReceipt(paymentId, justCreated = false) {
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
         ${r.tenant && r.tenant.id_number ? `<tr><td>رقم الهوية</td><td>${esc(r.tenant.id_number)}</td></tr>` : ''}
-        ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}</td></tr>` : ''}
+        ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
         <tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>
-        <tr><td>العقد</td><td>من ${esc(r.contract ? r.contract.start_date : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(r.contract.end_date) : ''} · الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>
+        <tr><td>العقد</td><td>من ${esc(r.contract ? r.contract.start_date : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(r.contract.end_date) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>
         <tr><td>المبلغ المستلم</td><td><strong>${money(p.amount)}</strong></td></tr>
         <tr><td>طريقة الدفع</td><td>${esc(p.method)}</td></tr>
         ${p.notes ? `<tr><td>ملاحظات</td><td>${esc(p.notes)}</td></tr>` : ''}
@@ -618,7 +712,7 @@ async function showTenantStatement(contractId) {
       ${companyHeader(s.settings)}
       <h2>كشف حساب مستأجر</h2>
       <p style="text-align:center" class="muted">المستأجر: ${esc(s.tenant ? s.tenant.name : '')} · الجوال: ${esc(s.tenant ? (s.tenant.phone || '—') : '—')} · الوحدة: ${esc(s.unit ? s.unit.name : '')} — ${esc(s.property ? s.property.name : '')}<br>
-      العقد: من ${esc(s.contract.start_date)} ${s.contract.end_date ? 'إلى ' + esc(s.contract.end_date) : '(مفتوح)'} · الإيجار: ${money(s.contract.rent_amount)} (${esc(s.summary.cycle_label || '')})</p>
+      العقد: من ${esc(s.contract.start_date)} ${s.contract.end_date ? 'إلى ' + esc(s.contract.end_date) : '(مفتوح)'} · إجمالي الإيجار: ${money(s.contract.rent_amount)} · قيمة القسط: ${money(s.summary.installment_amount)} (${s.summary.installments_total} دفعة — ${esc(s.summary.cycle_label || '')})</p>
       <table><tr><th>التاريخ</th><th>البيان</th><th>مستحق</th><th>مدفوع</th><th>الرصيد</th></tr>
       ${s.ledger.map((r) => `<tr><td>${esc(r.date)}</td><td>${esc(r.description)}</td><td>${r.due ? money(r.due) : '—'}</td><td>${r.paid ? money(r.paid) : '—'}</td><td>${money(r.balance)}</td></tr>`).join('')}
       </table>
@@ -650,9 +744,9 @@ function printLease(contractId) {
         <tr><td>هوية المستأجر</td><td>${esc(tenant.id_number || '—')}</td></tr>
         <tr><td>الوحدة المؤجرة</td><td>${esc(unit.name || c.unit_name || '')}${unit.type ? ' (' + esc(unit.type) + ')' : ''}${unit.floor ? ' — الدور: ' + esc(unit.floor) : ''}</td></tr>
         <tr><td>العقار / العنوان</td><td>${esc(property.name || c.property_name || '')}${property.address ? ' — ' + esc(property.address) : ''}</td></tr>
-        <tr><td>الأجرة</td><td>${money(c.rent_amount)} عن كل دورة سداد (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</td></tr>
+        <tr><td>الأجرة</td><td>إجمالي إيجار العقد لكامل المدة: ${money(c.rent_amount)}</td></tr>
+        <tr><td>الدفعات</td><td>قيمة القسط: ${money(c.installment_amount)} × ${c.installments_total} دفعة — دورة السداد: ${esc(CYCLE_LABELS[c.cycle] || c.cycle)}</td></tr>
         <tr><td>مدة العقد</td><td>من ${esc(c.start_date)} ${c.end_date ? 'إلى ' + esc(c.end_date) : '(عقد مفتوح حتى إشعار آخر باتفاق الطرفين)'}</td></tr>
-        ${c.contract_total ? `<tr><td>إجمالي قيمة العقد</td><td>${money(c.contract_total)}</td></tr>` : ''}
         ${Number(c.deposit) ? `<tr><td>مبلغ التأمين</td><td>${money(c.deposit)}</td></tr>` : ''}
       </table>
       <h4>بنود عامة</h4>
@@ -832,19 +926,48 @@ async function viewSettings() {
         <label>العنوان<input name="company_address" value="${esc(s.company_address || '')}" placeholder="مثال: الرياض — حي الشميسي، شارع ..."></label>
         <label>أرقام الهواتف<input name="company_phones" value="${esc(s.company_phones || '')}" placeholder="مثال: 05xxxxxxxx — 011xxxxxxx"></label>
         <label>بيانات إضافية (سجل تجاري / رقم ضريبي…)<input name="company_extra" value="${esc(s.company_extra || '')}" placeholder="مثال: س.ت 1010xxxxxx"></label>
+        <label>شعار المكتب (صورة PNG أو JPG أو WebP — حتى 700 كيلوبايت)<input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp"></label>
+        <div id="logoPreview" style="margin-bottom:10px"></div>
         <div class="form-actions"><button type="submit" class="btn primary">حفظ الإعدادات</button></div>
         <p class="error" id="settingsMsg"></p>
       </form>
     </div>`;
+  let logoValue = s.company_logo || '';
+  let logoDirty = false;
+  const drawLogoPreview = () => {
+    $('#logoPreview').innerHTML = logoValue
+      ? `<img class="logo-preview" src="${logoValue}" alt="شعار المكتب"><div style="margin-top:6px"><button type="button" class="btn small danger" id="logoRemove">إزالة الشعار</button></div>`
+      : '<p class="muted" style="margin:0">لا يوجد شعار حالياً.</p>';
+    const rm = $('#logoRemove');
+    if (rm) rm.addEventListener('click', () => { logoValue = ''; logoDirty = true; $('#logoFile').value = ''; drawLogoPreview(); });
+  };
+  drawLogoPreview();
+  $('#logoFile').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    const msg = $('#settingsMsg');
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      msg.style.color = ''; msg.textContent = 'صيغة الشعار غير صالحة — يجب أن تكون صورة PNG أو JPG أو WebP'; return;
+    }
+    if (file.size > 700 * 1024) {
+      msg.style.color = ''; msg.textContent = 'حجم الشعار يتجاوز الحد الأقصى (700 كيلوبايت)'; return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => { logoValue = String(reader.result); logoDirty = true; msg.textContent = ''; drawLogoPreview(); };
+    reader.onerror = () => { msg.textContent = 'تعذّرت قراءة ملف الشعار'; };
+    reader.readAsDataURL(file);
+  });
   $('#settingsForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const data = Object.fromEntries(new FormData(ev.target).entries());
+    if (logoDirty) data.company_logo = logoValue;
     try {
       await api('/api/settings', { method: 'PUT', body: JSON.stringify(data) });
+      logoDirty = false;
       const msg = $('#settingsMsg');
       msg.style.color = 'var(--ok)';
       msg.textContent = 'تم حفظ الإعدادات ✅';
-    } catch (err) { $('#settingsMsg').textContent = err.message; }
+    } catch (err) { const msg = $('#settingsMsg'); msg.style.color = ''; msg.textContent = err.message; }
   });
 }
 
