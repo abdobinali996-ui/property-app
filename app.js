@@ -372,8 +372,9 @@ async function viewDashboard() {
   main().innerHTML = `
     <div class="cards">
       <div class="card good"><div class="lbl">المحصّل هذا الشهر</div><div class="num">${money(d.collected_this_month)}</div></div>
-      <div class="card"><div class="lbl">المستحق هذا الشهر</div><div class="num">${money(d.due_this_month)}</div></div>
+      <div class="card" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض المستحق والمتأخر عند كل مستأجر"><div class="lbl">المستحق هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.due_this_month)}</div></div>
       <div class="card warn"><div class="lbl">إجمالي المتأخرات</div><div class="num">${money(d.total_arrears)}</div></div>
+      <div class="card"><div class="lbl">إجمالي الباقي (من كل العقود)</div><div class="num">${money(d.total_remaining ?? 0)}</div></div>
       <div class="card"><div class="lbl">عقارات / وحدات</div><div class="num">${d.counts.properties} / ${d.counts.units}</div></div>
       <div class="card"><div class="lbl">مستأجرون / عقود سارية</div><div class="num">${d.counts.tenants} / ${d.counts.active_contracts}</div></div>
       <div class="card"><div class="lbl">عدد المستأجرين</div><div class="num">${d.tenants_count ?? d.counts.tenants}</div></div>
@@ -432,6 +433,25 @@ async function viewDashboard() {
     PENDING_SEARCH = '';
     runSearch();
   }
+}
+
+// تفاصيل بطاقة «المستحق»: مستحق هذا الشهر المتبقي والمتأخرات عند كل مستأجر
+async function showDuesDetails() {
+  const d = await api('/api/dashboard');
+  const rows = d.dues_list || [];
+  const totDue = rows.reduce((s, r) => s + (Number(r.due_remaining) || 0), 0);
+  const totArr = rows.reduce((s, r) => s + (Number(r.arrears) || 0), 0);
+  openModal('المستحقات والمتأخرات — عند مين؟', rows.length ? `
+    <div class="table-wrap"><table>
+      <tr><th>المستأجر</th><th>الوحدة</th><th>العقار</th><th>مستحق هذا الشهر (المتبقي)</th><th>متأخرات</th><th></th></tr>
+      ${rows.map((r) => `<tr><td>${esc(r.tenant_name)}</td><td>${esc(r.unit_name)}</td><td>${esc(r.property_name)}</td>
+        <td class="money">${money(r.due_remaining)}</td>
+        <td class="${r.arrears > 0 ? 'arrears' : ''}">${money(r.arrears)}</td>
+        <td><button class="btn small primary" onclick="closeModal(); paymentForm(${r.contract_id}, ${r.arrears > 0 ? r.arrears : r.due_remaining})">تسجيل دفعة</button>${r.arrears > 0 ? ' ' + reminderBtn(r.tenant_id, r.arrears) : ''}</td></tr>`).join('')}
+      <tr><td colspan="3"><strong>الإجمالي</strong></td><td class="money"><strong>${money(totDue)}</strong></td><td class="arrears"><strong>${money(totArr)}</strong></td><td></td></tr>
+    </table></div>
+    <p class="muted">«مستحق هذا الشهر» = أقساط بدأت هذا الشهر ولم تُدفع بعد. «متأخرات» = مبالغ حلّ موعدها من فترات سابقة ولم تُدفع.</p>`
+    : '<p class="muted">لا توجد مستحقات أو متأخرات حالياً — ممتاز 🎉</p>');
 }
 
 // نتائج البحث الشامل مجمّعة حسب النوع، مع انتقال مباشر للملف/السند المعني

@@ -1707,9 +1707,33 @@ app.get('/api/dashboard', auth, async (req, res) => {
         .map((p) => calc.normalizeOwnerName(p.owner_name))
         .filter(Boolean),
     ).size;
+    // إجمالي الباقي من كل العقود السارية (المتبقي من كامل العقود)
+    const totalRemaining = contracts
+      .filter((c) => c.status === 'active')
+      .reduce((s, c) => s + (Number(c.remaining_on_contract) || 0), 0);
+    // تفصيل «مستحق عند مين ومتأخر عند مين» لكل عقد سارٍ: مستحق هذا الشهر
+    // المتبقي (أقساط بدأت هذا الشهر − مدفوعات إيجار هذا الشهر) + المتأخرات
+    const duesList = [];
+    for (const c of contracts) {
+      if (c.status !== 'active') continue;
+      const dueMonth = calc.dueInMonth(c, now.getFullYear(), now.getMonth());
+      const paidMonth = (paysByContract[c.id] || [])
+        .filter((p) => calc.isRentPayment(p) && calc.fmtDate(p.payment_date).startsWith(ym))
+        .reduce((s, p) => s + Number(p.amount || 0), 0);
+      const dueRemaining = Math.max(0, calc.round2(dueMonth - paidMonth));
+      if (dueRemaining <= 0 && !(c.arrears > 0)) continue;
+      duesList.push({
+        contract_id: c.id, tenant_id: c.tenant_id, tenant_name: c.tenant_name,
+        unit_name: c.unit_name, property_name: c.property_name,
+        due_this_month: dueMonth, due_remaining: dueRemaining, arrears: c.arrears || 0,
+      });
+    }
+    duesList.sort((a, b) => (b.arrears - a.arrears) || (b.due_remaining - a.due_remaining));
     res.json({
       collected_this_month: collectedThisMonth,
       due_this_month: dueThisMonth,
+      total_remaining: calc.round2(totalRemaining),
+      dues_list: duesList,
       total_arrears: arrearsList.reduce((s, r) => s + r.arrears, 0),
       arrears_list: arrearsList,
       expiring_soon: expiring,
