@@ -501,6 +501,9 @@ app.get('/api/payments/:id/receipt', auth, async (req, res) => {
     // دفعة غير إيجارية لا قسط لها — تُخفى فقرة القسط من السند كلياً
     let installment = contract ? calc.installmentInfo(contract, allPays, payment.id) : null;
     if (installment && installment.installment_index == null) installment = null;
+    // باقي القسط الحالي وتصنيفه (باقي/متأخر) — لدفعات الإيجار فقط، ويصح
+    // أيضاً مع السداد المقدم قبل الاستحقاق
+    const installment_balance = (contract && installment) ? calc.installmentBalance(contract, allPays) : null;
     const settings = await db.getSettings();
     const verify_code = receiptVerifyCode(payment);
     const normPayment = {
@@ -517,6 +520,7 @@ app.get('/api/payments/:id/receipt', auth, async (req, res) => {
       contract: contract ? { ...contract, start_date: calc.fmtDate(contract.start_date), end_date: calc.fmtDate(contract.end_date) || null } : null,
       summary,
       installment,
+      installment_balance,
       settings,
       verify_code,
       qr_text: receiptQrText({ payment: normPayment, receipt_no: payment.receipt_no, tenant, settings, verify_code }),

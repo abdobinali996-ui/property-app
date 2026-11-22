@@ -232,6 +232,24 @@ function nextUnpaidInstallment(contract, payments) {
   return null;
 }
 
+// موقف القسط الحالي (أول قسط غير مغطّى بالكامل): باقيه وتصنيفه حسب تاريخ
+// استحقاقه — «متأخر» إن بدأت فترته وبقي منه شيء، و«باقي» إن لم يحل موعده
+// بعد، ويشمل ذلك المسدد مقدماً (دفعة قبل الاستحقاق تغطي جزءاً من القسط
+// فيبقى باقيه «باقي» لا «متأخر»). يعيد null عند سداد العقد بالكامل.
+function installmentBalance(contract, payments) {
+  const next = nextUnpaidInstallment(contract, payments);
+  if (!next) return null;
+  return {
+    index: next.index,
+    total: installmentsCount(contract),
+    amount: next.amount,
+    remaining: next.remaining,
+    paid_towards: next.paid_towards,
+    due_date: next.due_date,
+    status: next.due_date <= fmtDate(today()) ? 'متأخر' : 'باقي',
+  };
+}
+
 // المستحق خلال شهر معيّن (أقساط تبدأ فترتها داخل ذلك الشهر، بمبالغها الفردية)
 function dueInMonth(contract, year, month) {
   const amounts = installmentAmounts(contract);
@@ -250,7 +268,7 @@ module.exports = {
   toDate, fmtDate, addMonths, addDays, today, round2,
   periodStarts, installmentsCount, installmentAmounts,
   contractSummary, dueInMonth, installmentInfo, paymentPeriod,
-  installmentSchedule, nextUnpaidInstallment,
+  installmentSchedule, nextUnpaidInstallment, installmentBalance,
   paymentPurpose, isRentPayment, isOfficePayment, rentPayments, OFFICE_PURPOSE,
   normalizeOwnerName,
 };
