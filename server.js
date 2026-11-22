@@ -1246,6 +1246,30 @@ app.get('/api/owners/statement.xlsx', auth, async (req, res) => {
 });
 
 // ---------- الملخص الشهري للمكتب (كل العقارات) ----------
+// تقسيم صفوف التحصيل المجمعة حسب الطريقة إلى أقسام رئيسية:
+// نقدي | بنك (تحويل + شبكة/مدى) | شيك | منصة إيجار (بفرعيها) | أخرى
+function groupMethodRows(byMethod) {
+  const methodGroupOf = (m) => {
+    const s = String(m || '');
+    if (s.includes('منصة')) return 'منصة إيجار';
+    if (s.includes('نقد')) return 'نقدي';
+    if (s.includes('شيك')) return 'شيك';
+    if (s.includes('بنك') || s.includes('تحويل') || s.includes('شبكة') || s.includes('مدى')) return 'بنك';
+    return 'أخرى';
+  };
+  const groupOrder = ['نقدي', 'بنك', 'شيك', 'منصة إيجار', 'أخرى'];
+  const perGroup = new Map();
+  for (const row of byMethod) {
+    const g = methodGroupOf(row.method);
+    if (!perGroup.has(g)) perGroup.set(g, { group: g, total: 0, count: 0, items: [] });
+    const b = perGroup.get(g);
+    b.total = calc.round2(b.total + row.total);
+    b.count += row.count;
+    b.items.push(row);
+  }
+  return groupOrder.filter((g) => perGroup.has(g)).map((g) => perGroup.get(g));
+}
+
 app.get('/api/reports/monthly', auth, async (req, res) => {
   try {
     const now = new Date();
@@ -1299,28 +1323,7 @@ app.get('/api/reports/monthly', auth, async (req, res) => {
     const byMethod = [...perMethod.entries()]
       .map(([method, b]) => ({ method, total: calc.round2(b.total), count: b.count }))
       .sort((a, b) => b.total - a.total);
-
-    // تقسيم المحصّل إلى أقسام رئيسية: نقدي | بنك (تحويل + شبكة/مدى) |
-    // شيك | منصة إيجار (بفرعيها: لحساب المكتب / لحساب المالك) | أخرى
-    const methodGroupOf = (m) => {
-      const s = String(m || '');
-      if (s.includes('منصة')) return 'منصة إيجار';
-      if (s.includes('نقد')) return 'نقدي';
-      if (s.includes('شيك')) return 'شيك';
-      if (s.includes('بنك') || s.includes('تحويل') || s.includes('شبكة') || s.includes('مدى')) return 'بنك';
-      return 'أخرى';
-    };
-    const groupOrder = ['نقدي', 'بنك', 'شيك', 'منصة إيجار', 'أخرى'];
-    const perGroup = new Map();
-    for (const row of byMethod) {
-      const g = methodGroupOf(row.method);
-      if (!perGroup.has(g)) perGroup.set(g, { group: g, total: 0, count: 0, items: [] });
-      const b = perGroup.get(g);
-      b.total = calc.round2(b.total + row.total);
-      b.count += row.count;
-      b.items.push(row);
-    }
-    const byMethodGrouped = groupOrder.filter((g) => perGroup.has(g)).map((g) => perGroup.get(g));
+    const byMethodGrouped = groupMethodRows(byMethod);
 
     // تجميع التحصيل حسب المقابل (الغرض) — يشمل «خدمات» (مال المكتب) بنداً
     // ظاهراً لوحده، وكل الأغراض داخلة أصلاً في إجمالي التحصيل
@@ -1752,8 +1755,22 @@ app.get('/api/dashboard', auth, async (req, res) => {
       });
     }
     duesList.sort((a, b) => (b.arrears - a.arrears) || (b.due_remaining - a.due_remaining));
+    // تفصيل محصّل هذا الشهر حسب أقسام طريقة الدفع (نقدي/بنك/شيك/منصة بفرعيها/أخرى)
+    const perMethodDash = new Map();
+    for (const p of payments) {
+      if (!calc.fmtDate(p.payment_date).startsWith(ym)) continue;
+      const key = p.method || 'تحويل';
+      const b = perMethodDash.get(key) || { total: 0, count: 0 };
+      b.total += Number(p.amount || 0);
+      b.count += 1;
+      perMethodDash.set(key, b);
+    }
+    const collectedByMethod = groupMethodRows(
+      [...perMethodDash.entries()].map(([method, b]) => ({ method, total: calc.round2(b.total), count: b.count })),
+    );
     res.json({
       collected_this_month: collectedThisMonth,
+      collected_by_method: collectedByMethod,
       due_this_month: dueThisMonth,
       total_remaining: calc.round2(totalRemaining),
       dues_list: duesList,

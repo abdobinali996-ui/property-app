@@ -401,7 +401,7 @@ async function viewDashboard() {
   const d = await api('/api/dashboard');
   main().innerHTML = `
     <div class="cards">
-      <div class="card good"><div class="lbl">المحصّل هذا الشهر</div><div class="num">${money(d.collected_this_month)}</div></div>
+      <div class="card good" style="cursor:pointer" onclick="showCollectedDetails()" title="اضغط لعرض المحصّل مقسماً حسب طريقة الدفع"><div class="lbl">المحصّل هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.collected_this_month)}</div></div>
       <div class="card" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض المستحق والمتأخر عند كل مستأجر"><div class="lbl">المستحق هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.due_this_month)}</div></div>
       <div class="card warn" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض المتأخرات عند كل مستأجر"><div class="lbl">إجمالي المتأخرات <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.total_arrears)}</div></div>
       <div class="card" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض التفاصيل عند كل مستأجر"><div class="lbl">إجمالي الباقي (من كل العقود) <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.total_remaining ?? 0)}</div></div>
@@ -482,6 +482,22 @@ async function showDuesDetails() {
     </table></div>
     <p class="muted">«مستحق هذا الشهر» = أقساط بدأت هذا الشهر ولم تُدفع بعد. «متأخرات» = مبالغ حلّ موعدها من فترات سابقة ولم تُدفع.</p>`
     : '<p class="muted">لا توجد مستحقات أو متأخرات حالياً — ممتاز 🎉</p>');
+}
+
+// تفصيل «المحصّل هذا الشهر» عند الضغط على بطاقته: كام كاش وكام بنك وكام
+// شيك وكام منصة (بفرعيها) — نفس أقسام الملخص الشهري
+async function showCollectedDetails() {
+  const d = await api('/api/dashboard');
+  const groups = d.collected_by_method || [];
+  const totCount = groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
+  openModal('المحصّل هذا الشهر — حسب طريقة الدفع', groups.length ? `
+    <div class="table-wrap"><table>
+      <tr><th>القسم / طريقة الدفع</th><th>عدد السندات</th><th>المبلغ</th></tr>
+      ${groups.map((g) => `<tr><td><strong>${esc(g.group)}</strong></td><td><strong>${g.count}</strong></td><td><strong>${money(g.total)}</strong></td></tr>${g.items.length > 1 ? g.items.map((x) => `<tr><td style="padding-right:22px">↳ ${esc(x.method)}</td><td>${x.count}</td><td>${money(x.total)}</td></tr>`).join('') : ''}`).join('')}
+      <tr><td><strong>الإجمالي</strong></td><td><strong>${totCount}</strong></td><td><strong>${money(d.collected_this_month)}</strong></td></tr>
+    </table></div>
+    <p class="muted">أقسام المحصّل هذا الشهر: نقدي، وبنك (تحويل بنكي وشبكة/مدى)، وشيك، ومنصة إيجار بفرعيها (لحساب المكتب / لحساب المالك).</p>`
+    : '<p class="muted">لا توجد تحصيلات هذا الشهر بعد.</p>');
 }
 
 // نتائج البحث الشامل مجمّعة حسب النوع، مع انتقال مباشر للملف/السند المعني
