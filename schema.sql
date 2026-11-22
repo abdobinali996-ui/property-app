@@ -61,11 +61,22 @@ CREATE TABLE IF NOT EXISTS payments (
   amount        NUMERIC(12,2) NOT NULL,
   payment_date  DATE NOT NULL DEFAULT CURRENT_DATE,
   method        TEXT NOT NULL DEFAULT 'تحويل',  -- نقداً / تحويل / شيك / شبكة
+  purpose       TEXT DEFAULT 'إيجار',  -- مقابل السند: إيجار / خدمات / مياه / كهرباء / أخرى
   receipt_no    INTEGER NOT NULL DEFAULT nextval('receipt_seq'),
   notes         TEXT DEFAULT '',
+  period_from   DATE,  -- بداية فترة السداد التي يغطيها السند (ميلادي دائماً)
+  period_to     DATE,  -- نهاية فترة السداد التي يغطيها السند (ميلادي دائماً)
+  created_by    TEXT DEFAULT '',  -- اسم مستخدم من أصدر السند
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS payments_receipt_no_idx ON payments(receipt_no);
+-- للقواعد الموجودة مسبقاً: إضافة عمودي فترة السداد
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS period_from DATE;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS period_to DATE;
+-- للقواعد الموجودة مسبقاً: من أصدر السند
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT '';
+-- للقواعد الموجودة مسبقاً: غرض الدفعة (المقابل)
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS purpose TEXT DEFAULT 'إيجار';
 
 -- تسلسل أرقام سندات الصرف
 CREATE SEQUENCE IF NOT EXISTS voucher_seq START 1;
@@ -81,6 +92,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   payee         TEXT DEFAULT '',               -- اسم المستفيد (لسند الصرف)
   payment_method TEXT DEFAULT 'نقداً',          -- نقداً / تحويل بنكي / شبكة / شيك
   voucher_no    INTEGER DEFAULT nextval('voucher_seq'),  -- رقم سند الصرف
+  created_by    TEXT DEFAULT '',               -- اسم مستخدم من أصدر السند
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS expenses_voucher_no_idx ON expenses(voucher_no);
@@ -98,6 +110,22 @@ UPDATE expenses e SET voucher_no = ranked.vn FROM ranked WHERE ranked.id = e.id;
 SELECT setval('voucher_seq', COALESCE((SELECT MAX(voucher_no) FROM expenses), 1),
   (SELECT COUNT(*) FROM expenses WHERE voucher_no IS NOT NULL) > 0);
 ALTER TABLE expenses ALTER COLUMN voucher_no SET DEFAULT nextval('voucher_seq');
+-- للقواعد الموجودة مسبقاً: من أصدر سند الصرف
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT '';
+
+-- حسابات دخول المستخدمين (تعدد المستخدمين والأدوار) — كلمات المرور مجزّأة بـ scrypt
+-- بصيغة salt:hash ولا تُحفظ كنص صريح أبداً. المدير الرئيسي (ADMIN_USER/ADMIN_PASSWORD
+-- من متغيرات البيئة) خارج هذا الجدول ويعمل دائماً كحساب إنقاذ.
+CREATE TABLE IF NOT EXISTS users (
+  id            SERIAL PRIMARY KEY,
+  username      TEXT NOT NULL,             -- فريد دون حساسية لحالة الأحرف
+  display_name  TEXT DEFAULT '',           -- الاسم الظاهر على السندات
+  password_hash TEXT NOT NULL DEFAULT '',  -- salt:hash (scrypt)
+  role          TEXT NOT NULL DEFAULT 'staff',  -- admin / staff
+  active        BOOLEAN NOT NULL DEFAULT TRUE,  -- الإيقاف بدل الحذف حفاظاً على سجل التدقيق
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (LOWER(username));
 
 -- إعدادات المؤسسة/المكتب (تظهر في ترويسة السندات والكشوف)
 CREATE TABLE IF NOT EXISTS settings (
@@ -129,6 +157,35 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 CREATE INDEX IF NOT EXISTS attachments_entity_idx ON attachments(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS meter_readings_unit_idx ON meter_readings(unit_id);
+
+-- سجل الحركات (التدقيق): إنشاء/تعديل/حذف الكيانات الأساسية مع ملخص عربي واسم المستخدم
+CREATE TABLE IF NOT EXISTS audit_log (
+  id          SERIAL PRIMARY KEY,
+  actor       TEXT DEFAULT '',        -- اسم مستخدم المدير المنفّذ للحركة
+  entity      TEXT NOT NULL DEFAULT '',  -- payments / expenses / contracts / tenants / properties / units / settings
+  entity_id   INTEGER,
+  action      TEXT NOT NULL DEFAULT '',  -- create / update / delete
+  summary     TEXT DEFAULT '',        -- ملخص عربي مقروء يُبنى وقت الكتابة
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS audit_log_entity_idx ON audit_log(entity);
+
+-- النسخ الاحتياطية التلقائية: لقطة كاملة من البيانات بعد كل تغيير
+-- (data = حمولة النسخة الاحتياطية JSON بنفس صيغة التصدير/الاستيراد)
+CREATE TABLE IF NOT EXISTS backups (
+  id          SERIAL PRIMARY KEY,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  trigger     TEXT NOT NULL DEFAULT 'auto',  -- auto / manual / pre-restore / pre-import
+  size_bytes  INTEGER NOT NULL DEFAULT 0,
+  data        TEXT NOT NULL DEFAULT '{}',
+  drive_status TEXT,  -- حالة رفع النسخة إلى Google Drive: synced / failed / NULL
+  drive_error  TEXT,  -- سبب فشل الرفع (قصير) عند وجوده
+  pinned      BOOLEAN NOT NULL DEFAULT FALSE  -- لقطة أمان مثبّتة (قبل استعادة/استيراد) تنجو مؤقتاً من الحذف
+);
+CREATE INDEX IF NOT EXISTS backups_created_idx ON backups(created_at);
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS drive_status TEXT;
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS drive_error TEXT;
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS units_property_idx    ON units(property_id);
 CREATE INDEX IF NOT EXISTS contracts_unit_idx    ON contracts(unit_id);

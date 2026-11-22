@@ -28,7 +28,11 @@
 <div id="app" class="hidden">
   <header class="topbar">
     <div class="brand">🏢 إدارة الأملاك العقارية</div>
+    <div id="headerClock" class="header-clock" title="التاريخ والوقت الآن بتوقيت الرياض"></div>
     <div class="top-actions">
+      <input id="globalSearchTop" type="search" placeholder="🔍 بحث شامل: سند، هوية، جوال، وحدة…" style="width:230px;max-width:44vw;padding:7px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.14);color:#fff">
+      <span id="userChip" style="font-size:13px;color:#dcebef;white-space:nowrap"></span>
+      <button id="changePwBtn" class="btn ghost">🔑 كلمة السر</button>
       <button id="installBtn" class="btn ghost hidden">📲 تثبيت التطبيق</button>
       <button id="logoutBtn" class="btn ghost">خروج</button>
     </div>
@@ -42,9 +46,15 @@
     <button data-view="contracts">العقود</button>
     <button data-view="payments">سندات القبض</button>
     <button data-view="expenses">المصروفات</button>
+    <button data-view="vouchers">سندات الصرف</button>
     <button data-view="statement">كشف المالك</button>
-    <button data-view="backup">التصدير والنسخ</button>
-    <button data-view="settings">إعدادات المؤسسة</button>
+    <button data-view="owners">الملاك</button>
+    <button data-view="monthly">الملخص الشهري</button>
+    <button data-view="reports">التقارير</button>
+    <button data-view="audit">سجل الحركات</button>
+    <button data-view="users" data-admin-only>المستخدمون</button>
+    <button data-view="backup" data-admin-only>التصدير والنسخ</button>
+    <button data-view="settings" data-admin-only>إعدادات المؤسسة</button>
   </nav>
 
   <main id="main"></main>
@@ -63,9 +73,13 @@
   </div>
 </div>
 
+<!-- تنبيه التذكير بالذكر -->
+<div id="dhikrToast" class="dhikr-toast hidden" title="اضغط للإخفاء"></div>
+
 <!-- منطقة الطباعة -->
 <div id="printArea"></div>
 
+<script src="qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

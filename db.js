@@ -9,8 +9,8 @@ const TABLES = {
   units: ['property_id', 'name', 'type', 'floor', 'default_rent', 'status', 'notes'],
   tenants: ['name', 'phone', 'id_number', 'email', 'notes'],
   contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'installments_count', 'deposit', 'status', 'notes'],
-  payments: ['contract_id', 'amount', 'payment_date', 'method', 'notes'],
-  expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method'],
+  payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by'],
+  expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
 };
 
@@ -55,7 +55,11 @@ CREATE TABLE IF NOT EXISTS payments (
   id SERIAL PRIMARY KEY, contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
   amount NUMERIC(12,2) NOT NULL, payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
   method TEXT NOT NULL DEFAULT 'تحويل', receipt_no INTEGER NOT NULL DEFAULT nextval('receipt_seq'),
-  notes TEXT DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+  notes TEXT DEFAULT '', period_from DATE, period_to DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS period_from DATE;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS period_to DATE;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS purpose TEXT DEFAULT 'إيجار';
 CREATE TABLE IF NOT EXISTS expenses (
   id SERIAL PRIMARY KEY, property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
   unit_id INTEGER REFERENCES units(id) ON DELETE SET NULL,
@@ -90,6 +94,26 @@ CREATE TABLE IF NOT EXISTS attachments (
   data_base64 TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS attachments_entity_idx ON attachments(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS meter_readings_unit_idx ON meter_readings(unit_id);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id SERIAL PRIMARY KEY, actor TEXT DEFAULT '', entity TEXT NOT NULL DEFAULT '',
+  entity_id INTEGER, action TEXT NOT NULL DEFAULT '', summary TEXT DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS audit_log_entity_idx ON audit_log(entity);
+CREATE TABLE IF NOT EXISTS backups (
+  id SERIAL PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  trigger TEXT NOT NULL DEFAULT 'auto', size_bytes INTEGER NOT NULL DEFAULT 0,
+  data TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS backups_created_idx ON backups(created_at);
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS drive_status TEXT;
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS drive_error TEXT;
+ALTER TABLE backups ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY, username TEXT NOT NULL, display_name TEXT DEFAULT '',
+  password_hash TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT 'staff',
+  active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (LOWER(username));
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT '';
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT '';
 `;
 
 // ---------------- مخزن JSON المحلي ----------------
@@ -101,7 +125,7 @@ function loadMem() {
   try {
     mem = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (_) {
-    mem = { seq: {}, receipt_seq: 0, voucher_seq: 0, settings: {}, properties: [], units: [], tenants: [], contracts: [], payments: [], expenses: [] };
+    mem = { seq: {}, receipt_seq: 0, voucher_seq: 0, settings: {}, properties: [], units: [], tenants: [], contracts: [], payments: [], expenses: [], audit_log: [], users: [], backups: [] };
   }
   for (const t of Object.keys(TABLES)) {
     if (!Array.isArray(mem[t])) mem[t] = [];
@@ -112,6 +136,13 @@ function loadMem() {
   if (!mem.settings || typeof mem.settings !== 'object') mem.settings = {};
   if (!Array.isArray(mem.attachments)) mem.attachments = [];
   if (!mem.seq.attachments) mem.seq.attachments = mem.attachments.reduce((m, r) => Math.max(m, r.id || 0), 0);
+  if (!Array.isArray(mem.audit_log)) mem.audit_log = [];
+  if (!mem.seq.audit_log) mem.seq.audit_log = mem.audit_log.reduce((m, r) => Math.max(m, r.id || 0), 0);
+  if (!Array.isArray(mem.users)) mem.users = [];
+  if (!mem.seq.users) mem.seq.users = mem.users.reduce((m, r) => Math.max(m, r.id || 0), 0);
+  if (!Array.isArray(mem.backups)) mem.backups = [];
+  if (!mem.seq.backups) mem.seq.backups = mem.backups.reduce((m, r) => Math.max(m, r.id || 0), 0);
+  for (const b of mem.backups) if (b.pinned === undefined) b.pinned = false; // لقطات قديمة بلا علم التثبيت
   // تسلسل سندات الصرف: ترقيم المصروفات القديمة التي بلا رقم، بترتيب إنشائها
   const maxVoucher = (mem.expenses || []).reduce((m, r) => Math.max(m, r.voucher_no || 0), 0);
   if (!mem.voucher_seq || mem.voucher_seq < maxVoucher) mem.voucher_seq = maxVoucher;
@@ -119,6 +150,10 @@ function loadMem() {
     if (e.payee === undefined) e.payee = '';
     if (e.payment_method === undefined) e.payment_method = 'نقداً';
     if (!e.voucher_no) e.voucher_no = ++mem.voucher_seq;
+  }
+  // دفعات قديمة بلا غرض: تُعامل وتُخزَّن كإيجار (الافتراضي)
+  for (const p of mem.payments || []) {
+    if (!p.purpose) p.purpose = 'إيجار';
   }
   return mem;
 }
@@ -157,7 +192,7 @@ function pick(table, obj) {
   for (const col of TABLES[table]) {
     if (obj[col] === undefined) continue;
     let v = obj[col];
-    if (v === '' && (col === 'end_date' || col === 'unit_id' || col === 'installments_count')) v = null;
+    if (v === '' && (col === 'end_date' || col === 'unit_id' || col === 'installments_count' || col === 'period_from' || col === 'period_to')) v = null;
     if (col === 'installments_count' && v !== null) {
       v = Number(v);
       if (!Number.isFinite(v) || v <= 0) v = null;
@@ -192,6 +227,7 @@ async function insert(table, obj) {
 
 async function insertPayment(obj) {
   const data = pick('payments', obj);
+  if (!data.purpose) data.purpose = 'إيجار'; // الغرض الافتراضي: إيجار
   if (usePg) {
     const cols = Object.keys(data);
     const vals = cols.map((c) => data[c]);
@@ -432,10 +468,245 @@ async function importAll(data) {
   return true;
 }
 
+// ---------------- سجل الحركات (التدقيق) ----------------
+// سجل إضافي فقط (append-only): يُكتب عند إنشاء/تعديل/حذف الكيانات الأساسية،
+// ولا يُحذف من الواجهة. الكتابة فيه يجب ألا تعطّل العملية الأساسية أبداً.
+async function insertAudit(entry) {
+  const row = {
+    actor: entry.actor || '',
+    entity: entry.entity || '',
+    entity_id: entry.entity_id !== undefined && entry.entity_id !== null && entry.entity_id !== ''
+      ? Number(entry.entity_id) : null,
+    action: entry.action || '',
+    summary: entry.summary || '',
+  };
+  if (usePg) {
+    const { rows } = await pool.query(
+      `INSERT INTO audit_log (actor, entity, entity_id, action, summary)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [row.actor, row.entity, row.entity_id, row.action, row.summary]);
+    return rows[0];
+  }
+  const m = loadMem();
+  const full = { id: ++m.seq.audit_log, created_at: new Date().toISOString(), ...row };
+  m.audit_log.push(full);
+  saveMem();
+  return full;
+}
+
+async function listAudit({ entity = '', limit = 200 } = {}) {
+  const lim = Math.min(Math.max(Number(limit) || 200, 1), 1000);
+  if (usePg) {
+    const { rows } = entity
+      ? await pool.query('SELECT * FROM audit_log WHERE entity = $1 ORDER BY id DESC LIMIT $2', [entity, lim])
+      : await pool.query('SELECT * FROM audit_log ORDER BY id DESC LIMIT $1', [lim]);
+    return rows;
+  }
+  return [...loadMem().audit_log]
+    .filter((r) => !entity || r.entity === entity)
+    .sort((a, b) => b.id - a.id)
+    .slice(0, lim);
+}
+
+// ---------------- المستخدمون (حسابات الدخول) ----------------
+// password_hash بصيغة salt:hash (scrypt) — لا يُعاد أبداً في أي استجابة API:
+// كل القراءات العامة تمر عبر publicUser التي تحذفه نهائياً.
+// ملاحظة: المستخدمون خارج النسخة الاحتياطية (exportAll/importAll) عمداً —
+// لا تسرّب للتجزئات في ملفات النسخ، وحسابات الدخول تنجو من أي استرجاع.
+function publicUser(r) {
+  if (!r) return null;
+  return {
+    id: r.id, username: r.username, display_name: r.display_name || '',
+    role: r.role === 'admin' ? 'admin' : 'staff',
+    active: r.active === undefined || r.active === null ? true : !!r.active,
+    created_at: r.created_at,
+  };
+}
+
+async function listUsers() {
+  if (usePg) {
+    const { rows } = await pool.query('SELECT * FROM users ORDER BY id');
+    return rows.map(publicUser);
+  }
+  return [...loadMem().users].sort((a, b) => a.id - b.id).map(publicUser);
+}
+
+// بحث باسم المستخدم دون حساسية لحالة الأحرف — يعيد الصف الكامل (للاستخدام الداخلي فقط)
+async function getUserByUsername(username) {
+  const u = String(username || '').trim().toLowerCase();
+  if (!u) return null;
+  if (usePg) {
+    const { rows } = await pool.query('SELECT * FROM users WHERE LOWER(username) = $1', [u]);
+    return rows[0] || null;
+  }
+  return loadMem().users.find((r) => String(r.username || '').toLowerCase() === u) || null;
+}
+
+async function getUserById(id) {
+  if (usePg) {
+    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+    return rows[0] || null;
+  }
+  return loadMem().users.find((r) => r.id === Number(id)) || null;
+}
+
+async function insertUser(obj) {
+  const data = {
+    username: String(obj.username || '').trim(),
+    display_name: String(obj.display_name || '').trim(),
+    password_hash: String(obj.password_hash || ''),
+    role: obj.role === 'admin' ? 'admin' : 'staff',
+    active: true,
+  };
+  if (usePg) {
+    const { rows } = await pool.query(
+      `INSERT INTO users (username, display_name, password_hash, role, active)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [data.username, data.display_name, data.password_hash, data.role, data.active]);
+    return rows[0];
+  }
+  const m = loadMem();
+  const row = { id: ++m.seq.users, created_at: new Date().toISOString(), ...data };
+  m.users.push(row);
+  saveMem();
+  return row;
+}
+
+async function updateUser(id, obj) {
+  const data = {};
+  if (obj.display_name !== undefined) data.display_name = String(obj.display_name || '').trim();
+  if (obj.role !== undefined) data.role = obj.role === 'admin' ? 'admin' : 'staff';
+  if (obj.active !== undefined) data.active = !!obj.active;
+  if (obj.password_hash !== undefined) data.password_hash = String(obj.password_hash || '');
+  const cols = Object.keys(data);
+  if (!cols.length) return getUserById(id);
+  if (usePg) {
+    const sets = cols.map((c, i) => `${c} = $${i + 1}`).join(',');
+    const { rows } = await pool.query(
+      `UPDATE users SET ${sets} WHERE id = $${cols.length + 1} RETURNING *`,
+      [...cols.map((c) => data[c]), id]);
+    return rows[0] || null;
+  }
+  const m = loadMem();
+  const row = m.users.find((r) => r.id === Number(id));
+  if (!row) return null;
+  Object.assign(row, data);
+  saveMem();
+  return row;
+}
+
+// عدد حسابات المديرين النشطة في جدول المستخدمين باستثناء حساب معيّن
+// (لمنع إيقاف أو تخفيض دور آخر مدير نشط — المدير الرئيسي من البيئة لا يُحتسب هنا)
+async function countActiveAdmins(excludeId) {
+  const all = usePg
+    ? (await pool.query('SELECT id, role, active FROM users')).rows
+    : loadMem().users;
+  return all.filter((r) => r.role === 'admin' && r.active !== false && Number(r.id) !== Number(excludeId)).length;
+}
+
+// ---------------- النسخ الاحتياطية التلقائية (لقطات كاملة) ----------------
+// كل لقطة تحمل حمولة النسخة الاحتياطية الكاملة بنفس صيغة التصدير/الاستيراد،
+// فالاستعادة تمر عبر importAll كما هي. قاعدة الاحتفاظ (pruneBackups):
+// أحدث لقطة واحدة فقط، بالإضافة إلى لقطة أمان مثبّتة (pinned) — وهي نسخة
+// «قبل الاستعادة»/«قبل الاستيراد» — ما دام لا يوجد أكثر من لقطة واحدة أحدث
+// منها؛ أي أنها تنجو من لقطة ما بعد الاستعادة/الاستيراد ثم تُحذف عند أخذ
+// اللقطة التالية. النتيجة: لقطة واحدة في الحالة العادية، واثنتان مؤقتاً
+// حول الاستعادة/الاستيراد.
+async function insertBackup({ trigger, data, pinned }) {
+  const payload = data || {};
+  const trig = ['auto', 'manual', 'pre-restore', 'pre-import'].includes(trigger) ? trigger : 'auto';
+  const size = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+  if (usePg) {
+    const { rows } = await pool.query(
+      `INSERT INTO backups (trigger, size_bytes, data, pinned) VALUES ($1, $2, $3, $4)
+       RETURNING id, created_at, trigger, size_bytes, drive_status, drive_error, pinned`,
+      [trig, size, JSON.stringify(payload), !!pinned]);
+    return rows[0];
+  }
+  const m = loadMem();
+  const row = {
+    id: ++m.seq.backups, created_at: new Date().toISOString(), trigger: trig,
+    size_bytes: size, drive_status: null, drive_error: null, pinned: !!pinned, data: payload,
+  };
+  m.backups.push(row);
+  saveMem();
+  const { data: _omit, ...meta } = row;
+  return meta;
+}
+
+async function listBackupsMeta() {
+  if (usePg) {
+    const { rows } = await pool.query(
+      'SELECT id, created_at, trigger, size_bytes, drive_status, drive_error, pinned FROM backups ORDER BY id DESC');
+    return rows;
+  }
+  return [...loadMem().backups].sort((a, b) => b.id - a.id)
+    .map(({ data, ...meta }) => ({ drive_status: null, drive_error: null, pinned: false, ...meta }));
+}
+
+// تسجيل نتيجة رفع اللقطة إلى Google Drive بعد استقرار الرفع (ناجح/فاشل).
+// تُستدعى بشكل غير متزامن بعد إنشاء اللقطة — وأي خطأ فيها يُبتلع بصمت.
+async function updateBackupDrive(id, { drive_status, drive_error }) {
+  const status = drive_status || null;
+  const error = drive_error ? String(drive_error).slice(0, 500) : null;
+  if (usePg) {
+    await pool.query('UPDATE backups SET drive_status = $1, drive_error = $2 WHERE id = $3',
+      [status, error, id]);
+    return true;
+  }
+  const m = loadMem();
+  const row = m.backups.find((b) => b.id === Number(id));
+  if (!row) return false;
+  row.drive_status = status;
+  row.drive_error = error;
+  saveMem();
+  return true;
+}
+
+async function getBackup(id) {
+  if (usePg) {
+    const { rows } = await pool.query('SELECT * FROM backups WHERE id = $1', [id]);
+    if (!rows[0]) return null;
+    let data = rows[0].data;
+    if (typeof data === 'string') { try { data = JSON.parse(data); } catch (_) { data = {}; } }
+    return { ...rows[0], data };
+  }
+  return loadMem().backups.find((b) => b.id === Number(id)) || null;
+}
+
+async function pruneBackups() {
+  let metas;
+  if (usePg) {
+    metas = (await pool.query('SELECT id, pinned FROM backups ORDER BY id DESC')).rows;
+  } else {
+    metas = [...loadMem().backups].sort((a, b) => b.id - a.id)
+      .map((b) => ({ id: b.id, pinned: !!b.pinned }));
+  }
+  if (metas.length <= 1) return 0;
+  // القاعدة الجديدة: أحدث لقطة فقط + أي لقطة مثبّتة (أمان) لا يتجاوز عدد
+  // اللقطات الأحدث منها واحدة — فتنجو الأمان من لقطة ما بعد عمليتها وتُحذف
+  // عند اللقطة التالية. (metas مرتّبة تنازلياً، فموضع الصف = عدد الأحدث منه)
+  const keep = new Set([metas[0].id]);
+  metas.forEach((b, idx) => { if (b.pinned && idx <= 1) keep.add(b.id); });
+  const doomed = metas.filter((b) => !keep.has(b.id)).map((b) => b.id);
+  if (!doomed.length) return 0;
+  if (usePg) {
+    await pool.query('DELETE FROM backups WHERE id = ANY($1)', [doomed]);
+  } else {
+    const m = loadMem();
+    m.backups = m.backups.filter((b) => !doomed.includes(b.id));
+    saveMem();
+  }
+  return doomed.length;
+}
+
 module.exports = {
   init, list, get, insert, insertPayment, update, remove, exportAll, importAll,
   getSettings, setSettings,
   listAttachments, listAttachmentsMeta, listAttachmentsFull, getAttachment, insertAttachment, removeAttachment,
+  insertAudit, listAudit,
+  publicUser, listUsers, getUserByUsername, getUserById, insertUser, updateUser, countActiveAdmins,
+  insertBackup, listBackupsMeta, getBackup, pruneBackups, updateBackupDrive,
   ATTACHMENT_TYPES, ATTACHMENT_MIMES, ATTACHMENT_MAX,
   TABLES, usePg,
 };
