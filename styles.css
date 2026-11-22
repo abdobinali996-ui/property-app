@@ -78,32 +78,33 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 
 /* الطباعة */
 #printArea { display: none; }
-@page { size: A4; margin: 9mm; }
+@page { size: A4; margin: 7mm; }
 @media print {
   body * { visibility: hidden; }
   #printArea { display: block; position: absolute; inset: 0; padding: 0; }
   #printArea * { visibility: visible; }
   /* السند في ورقة واحدة: ضغط مسافات وخطوط نسخة الطباعة فقط (الشاشة كما هي) */
-  .receipt-doc { padding: 12px 14px; border-width: 1.5px; page-break-inside: avoid; }
+  .receipt-doc { padding: 8px 14px; border-width: 1.5px; page-break-inside: avoid; }
   .receipt-doc .company-header { padding-bottom: 6px; margin-bottom: 8px; }
-  .receipt-doc .company-header div { line-height: 1.5; }
-  .receipt-doc .company-header .company-name { font-size: 18px; }
-  .receipt-doc .company-header .company-logo { max-height: 46px; margin-bottom: 4px; }
+  .receipt-doc .company-header div { line-height: 1.45; }
+  .receipt-doc .company-header .company-name { font-size: 17px; }
+  .receipt-doc .company-header .company-logo { max-height: 52px; margin-bottom: 4px; }
+  .receipt-doc .doc-stamp { margin: 4px auto 6px; padding: 3px 8px; font-size: 12.5px; }
   .receipt-doc h2 { font-size: 19px; }
   .receipt-doc .r-no { margin-bottom: 8px; font-size: 13px; }
-  .receipt-doc table { font-size: 13.5px; }
-  .receipt-doc td { padding: 4px; }
-  .receipt-doc .amount-words { padding: 7px 9px; margin: 8px 0; }
-  .receipt-doc .receipt-verify { margin-top: 8px; gap: 10px; }
-  .receipt-doc .receipt-verify .qr-box svg, .receipt-doc .receipt-verify .qr-box div { width: 84px !important; height: 84px !important; }
+  .receipt-doc table { font-size: 13px; }
+  .receipt-doc td { padding: 2.5px 4px; }
+  .receipt-doc .amount-words { padding: 5px 9px; margin: 6px 0; }
+  .receipt-doc .receipt-verify { margin-top: 6px; gap: 10px; }
+  .receipt-doc .receipt-verify .qr-box svg, .receipt-doc .receipt-verify .qr-box div { width: 76px !important; height: 76px !important; }
   .receipt-doc .receipt-verify .verify-note { font-size: 12px; line-height: 1.6; }
-  .receipt-doc .signatures { margin-top: 20px; }
+  .receipt-doc .signatures { margin-top: 6px; font-size: 12.5px; }
 }
 .company-header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 14px; }
 .company-header div { font-size: 13px; color: #444; line-height: 1.7; }
 .company-header .company-name { font-size: 20px; font-weight: 800; color: #111; }
-.company-header .company-logo { display: block; margin: 0 auto 8px; max-height: 64px; max-width: 240px; object-fit: contain; }
-.logo-preview { max-height: 64px; max-width: 240px; object-fit: contain; border: 1px solid var(--border); border-radius: 8px; padding: 4px; background: #fff; }
+.company-header .company-logo { display: block; margin: 0 auto 8px; max-height: 100px; max-width: 340px; object-fit: contain; }
+.logo-preview { max-height: 88px; max-width: 300px; object-fit: contain; border: 1px solid var(--border); border-radius: 8px; padding: 4px; background: #fff; }
 .receipt-doc { border: 2px solid #333; padding: 22px; max-width: 720px; margin: 0 auto; direction: rtl; }
 .receipt-doc h2 { text-align: center; margin: 0 0 4px; }
 .receipt-doc .r-no { text-align: center; color: #555; margin-bottom: 14px; }
