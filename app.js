@@ -820,7 +820,9 @@ function periodCountStr(startStr, endStr, cycle) {
 function contractForm(id, prefill) {
   const c = id ? CACHE.contracts.find((x) => x.id === id) : (prefill || {});
   formModal(id ? 'تعديل عقد' : (prefill ? 'تجديد عقد — راجع البيانات ثم احفظ كعقد جديد' : 'إضافة عقد'), `
+    <label>بحث الوحدة<input id="ctUnitSearch" type="text" placeholder="ابحث باسم الوحدة أو العقار…"></label>
     <label>الوحدة *<select name="unit_id" required>${CACHE.units.map((u) => `<option value="${u.id}" ${c.unit_id === u.id ? 'selected' : ''}>${esc(u.name)} — ${esc(propName(u.property_id))}</option>`).join('')}</select></label>
+    <label>بحث المستأجر<input id="ctTenantSearch" type="text" placeholder="ابحث بالاسم أو رقم الجوال أو رقم العقد…"></label>
     <label>المستأجر *<select name="tenant_id" required>${CACHE.tenants.map((t) => `<option value="${t.id}" ${c.tenant_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
     <label>تاريخ البداية *<input name="start_date" type="date" required value="${esc(c.start_date || todayStr())}"></label>
     <label>تاريخ النهاية (اختياري)<input name="end_date" type="date" value="${esc(c.end_date || '')}"></label>
@@ -853,6 +855,26 @@ function contractForm(id, prefill) {
     const startEl = form.elements.start_date, endEl = form.elements.end_date,
       cycleEl = form.elements.cycle, rentEl = form.elements.rent_amount,
       countEl = form.elements.installments_count, hintEl = document.getElementById('ctHint');
+    // بحث حي عند الوحدة وعند المستأجر: تصفية القائمتين أثناء الكتابة مع الحفاظ على الاختيار الحالي
+    const unitSel = form.elements.unit_id, tenantSel = form.elements.tenant_id;
+    const unitSearchEl = document.getElementById('ctUnitSearch');
+    const tenantSearchEl = document.getElementById('ctTenantSearch');
+    const refillUnits = () => {
+      const q = (unitSearchEl.value || '').trim();
+      const cur = unitSel.value;
+      unitSel.innerHTML = CACHE.units.filter((u) => !q || String(u.name || '').includes(q) || String(propName(u.property_id) || '').includes(q))
+        .map((u) => `<option value="${u.id}">${esc(u.name)} — ${esc(propName(u.property_id))}</option>`).join('');
+      if ([...unitSel.options].some((o) => o.value === cur)) unitSel.value = cur;
+    };
+    const refillTenants = () => {
+      const q = (tenantSearchEl.value || '').trim();
+      const cur = tenantSel.value;
+      tenantSel.innerHTML = CACHE.tenants.filter((t) => !q || String(t.name || '').includes(q) || String(t.phone || '').includes(q) || String(t.contract_no || '').includes(q))
+        .map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+      if ([...tenantSel.options].some((o) => o.value === cur)) tenantSel.value = cur;
+    };
+    unitSearchEl.addEventListener('input', refillUnits);
+    tenantSearchEl.addEventListener('input', refillTenants);
     const autoCount = () => {
       const n = periodCountStr(startEl.value, endEl.value, cycleEl.value);
       return n > 0 ? n : (CYCLE_YEAR_COUNT_F[cycleEl.value] || 12);
