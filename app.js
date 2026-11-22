@@ -4,7 +4,7 @@
 // ---------------- أدوات عامة ----------------
 const $ = (sel) => document.querySelector(sel);
 const main = () => $('#main');
-const token = () => localStorage.getItem('pm_token') || '';
+const token = () => sessionStorage.getItem('pm_token') || '';
 const money = (n) => `${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ر.س`;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const todayStr = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
@@ -237,14 +237,16 @@ function confirmDelete(label, onYes) {
 }
 
 // ---------------- الدخول والخروج ----------------
-// المستخدم الحالي (الاسم الظاهر والدور ونوع الحساب) — يُحفظ محلياً ويُحدَّث من الخادم
+// المستخدم الحالي (الاسم الظاهر والدور ونوع الحساب) — يُحفظ في ذاكرة الجلسة فقط ويُحدَّث من الخادم
+// بطلب صريح من صاحب البرنامج: تسجيل الدخول يُطلب عند كل فتح للتطبيق — لا يُحفظ أي دخول دائم على الجهاز
+try { localStorage.removeItem('pm_token'); localStorage.removeItem('pm_user'); } catch (_) {}
 let ME = null;
-try { ME = JSON.parse(localStorage.getItem('pm_user') || 'null'); } catch (_) { ME = null; }
+try { ME = JSON.parse(sessionStorage.getItem('pm_user') || 'null'); } catch (_) { ME = null; }
 const IS_ADMIN = () => !!ME && ME.role === 'admin';
 function setME(user) {
   ME = user || null;
-  if (ME) localStorage.setItem('pm_user', JSON.stringify(ME));
-  else localStorage.removeItem('pm_user');
+  if (ME) sessionStorage.setItem('pm_user', JSON.stringify(ME));
+  else sessionStorage.removeItem('pm_user');
 }
 // إظهار/إخفاء عناصر المدير فقط (تبويبات المستخدمين والإعدادات والتصدير) + شارة المستخدم
 function applyRoleUI() {
@@ -256,7 +258,7 @@ function applyRoleUI() {
 }
 function logout() {
   dhikrStop();
-  localStorage.removeItem('pm_token');
+  sessionStorage.removeItem('pm_token');
   setME(null);
   $('#app').classList.add('hidden');
   $('#loginScreen').classList.remove('hidden');
@@ -269,7 +271,7 @@ $('#loginForm').addEventListener('submit', async (e) => {
     const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     const out = await res.json();
     if (!res.ok) throw new Error(out.error || 'خطأ');
-    localStorage.setItem('pm_token', out.token);
+    sessionStorage.setItem('pm_token', out.token);
     setME(out.user || null);
     startApp();
   } catch (err) { $('#loginError').textContent = err.message; }

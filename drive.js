@@ -28,11 +28,19 @@ function apiBase() {
   return String(process.env.GOOGLE_DRIVE_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, '');
 }
 
+// تنظيف قيم OAuth: الهوية والسر ورمز التحديث لا تحتوي مسافات أبداً — نزيل أي
+// مسافات أو أسطر تسللت أثناء النسخ واللصق، ونفكّ علامات اقتباس محيطة إن وجدت
+function cleanCred(v) {
+  let s = String(v || '').replace(/\s+/g, '');
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
+  return s;
+}
+
 // مصادقة المستخدم نفسه (OAuth برمز تحديث) — تُفضَّل عند وجودها
 function oauthConfigured() {
-  return !!(String(process.env.GOOGLE_OAUTH_CLIENT_ID || '').trim()
-    && String(process.env.GOOGLE_OAUTH_CLIENT_SECRET || '').trim()
-    && String(process.env.GOOGLE_OAUTH_REFRESH_TOKEN || '').trim());
+  return !!(cleanCred(process.env.GOOGLE_OAUTH_CLIENT_ID)
+    && cleanCred(process.env.GOOGLE_OAUTH_CLIENT_SECRET)
+    && cleanCred(process.env.GOOGLE_OAUTH_REFRESH_TOKEN));
 }
 
 // الميزة مفعّلة عند وجود معرّف المجلد مع أيٍّ من طريقتي المصادقة كاملةً
@@ -77,25 +85,54 @@ function buildJwt(clientEmail, privateKey) {
   return `${unsigned}.${signature}`;
 }
 
+// تبادل رمز التحديث برمز وصول باسم المستخدم نفسه. نحاول أولاً بمصادقة العميل
+// داخل جسم الطلب (client_secret_post)، وعند أي رفض نعيد المحاولة بمصادقة
+// Basic (client_secret_basic) — جوجل تقبل الطريقتين لعملاء الويب
+async function refreshOAuthToken() {
+  const clientId = cleanCred(process.env.GOOGLE_OAUTH_CLIENT_ID);
+  const clientSecret = cleanCred(process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+  const refreshToken = cleanCred(process.env.GOOGLE_OAUTH_REFRESH_TOKEN);
+  const attempts = [
+    {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+      }).toString(),
+    },
+    {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }).toString(),
+    },
+  ];
+  let lastErr = null;
+  for (const attempt of attempts) {
+    const res = await fetchWithTimeout(tokenUrl(), { method: 'POST', ...attempt });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.access_token) return json;
+      lastErr = new Error('استجابة رمز Drive بلا access_token');
+      continue;
+    }
+    lastErr = new Error(`فشل تجديد رمز Drive (${res.status})${await shortBody(res)}`);
+  }
+  throw lastErr;
+}
+
 // تبادل الـJWT برمز وصول — يُخزَّن الرمز حتى قرب انتهائه
 let tokenCache = { token: null, expiresAt: 0 };
 async function getAccessToken() {
   if (tokenCache.token && Date.now() < tokenCache.expiresAt) return tokenCache.token;
   if (oauthConfigured()) {
-    // تبادل رمز التحديث برمز وصول باسم المستخدم نفسه
-    const res = await fetchWithTimeout(tokenUrl(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: String(process.env.GOOGLE_OAUTH_CLIENT_ID).trim(),
-        client_secret: String(process.env.GOOGLE_OAUTH_CLIENT_SECRET).trim(),
-        refresh_token: String(process.env.GOOGLE_OAUTH_REFRESH_TOKEN).trim(),
-      }).toString(),
-    });
-    if (!res.ok) throw new Error(`فشل تجديد رمز Drive (${res.status})${await shortBody(res)}`);
-    const json = await res.json();
-    if (!json.access_token) throw new Error('استجابة رمز Drive بلا access_token');
+    const json = await refreshOAuthToken();
     const ttlMs = Math.max(60, Number(json.expires_in || 3600) - 60) * 1000;
     tokenCache = { token: json.access_token, expiresAt: Date.now() + ttlMs };
     return tokenCache.token;
