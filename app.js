@@ -1301,6 +1301,8 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     const gregBox = document.getElementById('periodGreg');
     const hijriBox = document.getElementById('periodHijri');
     let periodTouched = false;
+    let toTouched = false;
+    let svcMonths = 0;
     const gregToHijriFill = () => {
       const f = isoToHijriParts(fromEl.value);
       const t = isoToHijriParts(toEl.value);
@@ -1317,6 +1319,7 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       const c = pool.find((x) => x.id === Number(contractEl.value));
       const def = defaultPeriodClient(c, dateEl.value);
       if (!def) return;
+      toTouched = false;
       fromEl.value = def.period_from;
       toEl.value = def.period_to;
       if (calEl.value === 'hijri') gregToHijriFill();
@@ -1325,10 +1328,29 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       if (calEl.value === 'hijri') { gregToHijriFill(); gregBox.classList.add('hidden'); hijriBox.classList.remove('hidden'); }
       else { hijriToGregFill(); hijriBox.classList.add('hidden'); gregBox.classList.remove('hidden'); }
     });
-    [fromEl, toEl].forEach((el) => el.addEventListener('change', () => { periodTouched = true; }));
-    ['pfHd', 'pfHm', 'pfHy', 'ptHd', 'ptHm', 'ptHy'].forEach((id) => {
+    // في وضع الهجري: عند إدخال بداية الفترة هجرياً تُحسب نهايتها بالأشهر
+    // الهجرية نفسها — نفس اليوم بعد مدة الدورة (أو مدة الخدمة المختارة):
+    // «٩/٦/١٤٤٨ ينتهي ٩/٩/١٤٤٨» لعقد ربع سنوي (طلب عبده)
+    const autoPeriodToHijri = () => {
+      if (calEl.value !== 'hijri' || toTouched) return;
+      const f = hijriToIso($('#pfHy').value, $('#pfHm').value, $('#pfHd').value);
+      if (!f) return;
+      fromEl.value = f;
+      const c = pool.find((x) => x.id === Number(contractEl.value));
+      const isSvc = form.elements.purpose && form.elements.purpose.value === 'خدمات';
+      const months = (isSvc && svcMonths) ? svcMonths : (CYCLE_MONTHS_F[c?.cycle] || 1);
+      const t = addMonthsHijriStr(f, months);
+      if (t) { toEl.value = t; gregToHijriFill(); }
+    };
+    fromEl.addEventListener('change', () => { periodTouched = true; });
+    toEl.addEventListener('change', () => { periodTouched = true; toTouched = true; });
+    ['pfHd', 'pfHm', 'pfHy'].forEach((id) => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('change', () => { periodTouched = true; });
+      if (el) el.addEventListener('change', () => { periodTouched = true; autoPeriodToHijri(); });
+    });
+    ['ptHd', 'ptHm', 'ptHy'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', () => { periodTouched = true; toTouched = true; });
     });
     // بحث واختيار متسلسل: عقار ← مستأجر ← عقد، والوحدة تظهر تلقائياً بمجرد اختيار المستأجر
     const propSearchEl = document.getElementById('payPropSearch');
@@ -1416,10 +1438,13 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     };
     if (svcBox) svcBox.querySelectorAll('[data-svc-months]').forEach((btn) => btn.addEventListener('click', () => {
       const months = Number(btn.dataset.svcMonths);
-      const from = dateEl.value || todayStr();
+      svcMonths = months;
+      const from = (calEl.value === 'hijri' && fromEl.value) ? fromEl.value : (dateEl.value || todayStr());
       fromEl.value = from;
-      toEl.value = addDaysStr(addMonthsStr(from, months), -1);
+      // في وضع الهجري تُحسب المدة بأشهر هجرية (نفس اليوم)، وإلا ميلادية
+      toEl.value = calEl.value === 'hijri' ? addMonthsHijriStr(from, months) : addDaysStr(addMonthsStr(from, months), -1);
       periodTouched = true;
+      toTouched = true;
       if (calEl.value === 'hijri') gregToHijriFill();
     }));
     contractEl.addEventListener('change', fillInstallments);
@@ -1428,7 +1453,7 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       const c = pool.find((x) => x.id === Number(contractEl.value));
       if (instEl.value) {
         const per = installmentPeriodClient(c, Number(instEl.value));
-        if (per) { fromEl.value = per.period_from; toEl.value = per.period_to; if (calEl.value === 'hijri') gregToHijriFill(); }
+        if (per) { fromEl.value = per.period_from; toEl.value = per.period_to; toTouched = false; if (calEl.value === 'hijri') gregToHijriFill(); }
       } else applyDefaultPeriod();
     });
     if (purposeEl) purposeEl.addEventListener('change', syncPurpose);
