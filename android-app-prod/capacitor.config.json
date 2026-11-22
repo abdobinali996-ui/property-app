@@ -1,0 +1,9 @@
+{
+  "appId": "com.sulaiman.propertyapp",
+  "appName": "إدارة الأملاك العقارية",
+  "webDir": "www",
+  "server": {
+    "url": "https://property-app-u8di.onrender.com",
+    "cleartext": false
+  }
+}
