@@ -5,8 +5,12 @@
 // وتعمل اللقطات كما هي تماماً داخل قاعدة البيانات فقط.
 //
 // المتغيرات:
+//   GOOGLE_DRIVE_FOLDER_ID      — معرّف مجلد Drive الهدف (مطلوب في الحالتين)
+//   الطريقة أ (المستخدم نفسه — لحسابات Gmail الشخصية):
+//   GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REFRESH_TOKEN
+//   الطريقة ب (حساب خدمة — لـGoogle Workspace / الدرايفات المشتركة فقط؛ حسابات
+//   Gmail الشخصية ترفضها جوجل بخطأ «Service Accounts do not have storage quota»):
 //   GOOGLE_SERVICE_ACCOUNT_JSON — محتوى ملف مفتاح حساب الخدمة (JSON) كنص واحد
-//   GOOGLE_DRIVE_FOLDER_ID      — معرّف مجلد Drive المشترك مع حساب الخدمة
 //   GOOGLE_OAUTH_TOKEN_URL      — (اختياري، للاختبارات) بديل لنقطة تبادل الرمز
 //   GOOGLE_DRIVE_API_BASE       — (اختياري، للاختبارات) بديل لقاعدة Drive API
 const crypto = require('crypto');
@@ -24,10 +28,18 @@ function apiBase() {
   return String(process.env.GOOGLE_DRIVE_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, '');
 }
 
-// الميزة مفعّلة عند وجود المتغيرين الأساسيين معاً (نصوص غير فارغة)
+// مصادقة المستخدم نفسه (OAuth برمز تحديث) — تُفضَّل عند وجودها
+function oauthConfigured() {
+  return !!(String(process.env.GOOGLE_OAUTH_CLIENT_ID || '').trim()
+    && String(process.env.GOOGLE_OAUTH_CLIENT_SECRET || '').trim()
+    && String(process.env.GOOGLE_OAUTH_REFRESH_TOKEN || '').trim());
+}
+
+// الميزة مفعّلة عند وجود معرّف المجلد مع أيٍّ من طريقتي المصادقة كاملةً
 function configured() {
-  return !!(String(process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '').trim()
-    && String(process.env.GOOGLE_DRIVE_FOLDER_ID || '').trim());
+  if (!String(process.env.GOOGLE_DRIVE_FOLDER_ID || '').trim()) return false;
+  return oauthConfigured()
+    || !!String(process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '').trim();
 }
 
 function serviceAccount() {
@@ -69,6 +81,25 @@ function buildJwt(clientEmail, privateKey) {
 let tokenCache = { token: null, expiresAt: 0 };
 async function getAccessToken() {
   if (tokenCache.token && Date.now() < tokenCache.expiresAt) return tokenCache.token;
+  if (oauthConfigured()) {
+    // تبادل رمز التحديث برمز وصول باسم المستخدم نفسه
+    const res = await fetchWithTimeout(tokenUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: String(process.env.GOOGLE_OAUTH_CLIENT_ID).trim(),
+        client_secret: String(process.env.GOOGLE_OAUTH_CLIENT_SECRET).trim(),
+        refresh_token: String(process.env.GOOGLE_OAUTH_REFRESH_TOKEN).trim(),
+      }).toString(),
+    });
+    if (!res.ok) throw new Error(`فشل تجديد رمز Drive (${res.status})${await shortBody(res)}`);
+    const json = await res.json();
+    if (!json.access_token) throw new Error('استجابة رمز Drive بلا access_token');
+    const ttlMs = Math.max(60, Number(json.expires_in || 3600) - 60) * 1000;
+    tokenCache = { token: json.access_token, expiresAt: Date.now() + ttlMs };
+    return tokenCache.token;
+  }
   const sa = serviceAccount();
   const jwt = buildJwt(sa.client_email, sa.private_key);
   const res = await fetchWithTimeout(tokenUrl(), {
