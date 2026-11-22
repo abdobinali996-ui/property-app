@@ -403,8 +403,8 @@ async function viewDashboard() {
     <div class="cards">
       <div class="card good"><div class="lbl">المحصّل هذا الشهر</div><div class="num">${money(d.collected_this_month)}</div></div>
       <div class="card" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض المستحق والمتأخر عند كل مستأجر"><div class="lbl">المستحق هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.due_this_month)}</div></div>
-      <div class="card warn"><div class="lbl">إجمالي المتأخرات</div><div class="num">${money(d.total_arrears)}</div></div>
-      <div class="card"><div class="lbl">إجمالي الباقي (من كل العقود)</div><div class="num">${money(d.total_remaining ?? 0)}</div></div>
+      <div class="card warn" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض المتأخرات عند كل مستأجر"><div class="lbl">إجمالي المتأخرات <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.total_arrears)}</div></div>
+      <div class="card" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض التفاصيل عند كل مستأجر"><div class="lbl">إجمالي الباقي (من كل العقود) <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.total_remaining ?? 0)}</div></div>
       <div class="card"><div class="lbl">عقارات / وحدات</div><div class="num">${d.counts.properties} / ${d.counts.units}</div></div>
       <div class="card"><div class="lbl">مستأجرون / عقود سارية</div><div class="num">${d.counts.tenants} / ${d.counts.active_contracts}</div></div>
       <div class="card"><div class="lbl">عدد المستأجرين</div><div class="num">${d.tenants_count ?? d.counts.tenants}</div></div>
@@ -1920,9 +1920,10 @@ async function loadMonthly() {
       ${r.by_property.map((x) => `<tr><td>${esc(x.property_name)}</td><td>${money(x.collected)}</td><td>${money(x.expenses)}</td><td><strong>${money(x.net)}</strong></td></tr>`).join('')}
       <tr><td><strong>الإجمالي</strong></td><td><strong>${money(r.total_collected)}</strong></td><td><strong>${money(r.total_expenses)}</strong></td><td><strong>${money(r.net)}</strong></td></tr></table>`
       : '<p class="muted">لا توجد حركة مالية في هذا الشهر.</p>'}
-      <h4>التحصيل حسب طريقة الدفع</h4>
-      ${r.by_method.length ? `<table><tr><th>طريقة الدفع</th><th>عدد السندات</th><th>المبلغ</th></tr>
-      ${r.by_method.map((x) => `<tr><td>${esc(x.method)}</td><td>${x.count}</td><td>${money(x.total)}</td></tr>`).join('')}</table>`
+      <h4>المحصّل حسب طريقة الدفع</h4>
+      ${(r.by_method_grouped && r.by_method_grouped.length) ? `<table><tr><th>القسم / طريقة الدفع</th><th>عدد السندات</th><th>المبلغ</th></tr>
+      ${r.by_method_grouped.map((g) => `<tr><td><strong>${esc(g.group)}</strong></td><td><strong>${g.count}</strong></td><td><strong>${money(g.total)}</strong></td></tr>${g.items.length > 1 ? g.items.map((x) => `<tr><td style="padding-right:22px">↳ ${esc(x.method)}</td><td>${x.count}</td><td>${money(x.total)}</td></tr>`).join('') : ''}`).join('')}
+      <tr><td><strong>الإجمالي</strong></td><td><strong>${r.payments_count}</strong></td><td><strong>${money(r.total_collected)}</strong></td></tr></table>`
       : '<p class="muted">لا توجد تحصيلات في هذا الشهر.</p>'}
       <h4>التحصيل حسب المقابل</h4>
       ${(r.by_purpose && r.by_purpose.length) ? `<table><tr><th>المقابل</th><th>عدد السندات</th><th>المبلغ</th></tr>

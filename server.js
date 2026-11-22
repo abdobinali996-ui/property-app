@@ -1300,6 +1300,28 @@ app.get('/api/reports/monthly', auth, async (req, res) => {
       .map(([method, b]) => ({ method, total: calc.round2(b.total), count: b.count }))
       .sort((a, b) => b.total - a.total);
 
+    // تقسيم المحصّل إلى أقسام رئيسية: نقدي | بنك (تحويل + شبكة/مدى) |
+    // شيك | منصة إيجار (بفرعيها: لحساب المكتب / لحساب المالك) | أخرى
+    const methodGroupOf = (m) => {
+      const s = String(m || '');
+      if (s.includes('منصة')) return 'منصة إيجار';
+      if (s.includes('نقد')) return 'نقدي';
+      if (s.includes('شيك')) return 'شيك';
+      if (s.includes('بنك') || s.includes('تحويل') || s.includes('شبكة') || s.includes('مدى')) return 'بنك';
+      return 'أخرى';
+    };
+    const groupOrder = ['نقدي', 'بنك', 'شيك', 'منصة إيجار', 'أخرى'];
+    const perGroup = new Map();
+    for (const row of byMethod) {
+      const g = methodGroupOf(row.method);
+      if (!perGroup.has(g)) perGroup.set(g, { group: g, total: 0, count: 0, items: [] });
+      const b = perGroup.get(g);
+      b.total = calc.round2(b.total + row.total);
+      b.count += row.count;
+      b.items.push(row);
+    }
+    const byMethodGrouped = groupOrder.filter((g) => perGroup.has(g)).map((g) => perGroup.get(g));
+
     // تجميع التحصيل حسب المقابل (الغرض) — يشمل «خدمات» (مال المكتب) بنداً
     // ظاهراً لوحده، وكل الأغراض داخلة أصلاً في إجمالي التحصيل
     const perPurpose = new Map();
@@ -1337,6 +1359,7 @@ app.get('/api/reports/monthly', auth, async (req, res) => {
       expenses_count: monthExpenses.length,
       by_property: byProperty,
       by_method: byMethod,
+      by_method_grouped: byMethodGrouped,
       by_purpose: byPurpose,
       settings: await db.getSettings(),
     });
