@@ -43,6 +43,67 @@ function addDays(date, n) {
   return d;
 }
 
+// ==== تقويم هجري (أم القرى عبر Intl) — لعقود اختار صاحبها التقويم الهجري:
+// الاستحقاق حينها بأشهر هجرية فينشأ فرق أيام عن الميلادي بطبيعة الحال ====
+// أطوال الشهور التقريبية — خطوة بحث فقط، والتحقق النهائي دائماً بمطابقة Intl
+const HIJRI_MONTH_DAYS = [30, 29, 30, 29, 30, 29, 30, 29, 30, 29, 30, 29];
+
+function gregToHijriParts(date) {
+  const parts = new Intl.DateTimeFormat('en-u-ca-islamic-umalqura', { day: 'numeric', month: 'numeric', year: 'numeric' }).formatToParts(date);
+  const o = {};
+  for (const p of parts) if (p.type !== 'literal') o[p.type] = Number(p.value);
+  return { y: o.year, m: o.month, d: o.day };
+}
+
+function hijriOrdinalOf(y, m, d) {
+  let days = (y - 1) * 354 + Math.floor((11 * (y - 1) + 14) / 30);
+  for (let i = 0; i < m - 1 && i < 11; i++) days += HIJRI_MONTH_DAYS[i];
+  return days + d;
+}
+
+// تاريخ هجري (أم القرى) → Date ميلادية، أو null إن لم يوجد ذلك اليوم
+// في ذلك الشهر فعلاً (مثل اليوم 30 في شهرٍ طوله 29)
+function hijriToGregorian(y, m, d) {
+  y = Number(y); m = Number(m); d = Number(d);
+  if (!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 30) return null;
+  const target = hijriOrdinalOf(y, m, d);
+  let cand = new Date(2000, 0, 1);
+  const ap = gregToHijriParts(cand);
+  cand.setDate(cand.getDate() + (target - hijriOrdinalOf(ap.y, ap.m, ap.d)));
+  for (let i = 0; i < 15; i++) {
+    const cp = gregToHijriParts(cand);
+    if (cp.y === y && cp.m === m && cp.d === d) return cand;
+    const diff = target - hijriOrdinalOf(cp.y, cp.m, cp.d);
+    if (diff === 0) break;
+    cand.setDate(cand.getDate() + diff);
+  }
+  for (let off = -3; off <= 3; off++) {
+    const t = new Date(cand.getFullYear(), cand.getMonth(), cand.getDate() + off);
+    const cp = gregToHijriParts(t);
+    if (cp.y === y && cp.m === m && cp.d === d) return t;
+  }
+  return null;
+}
+
+// إضافة أشهر هجرية إلى تاريخ ميلادي: يُثبَّت يوم الشهر الهجري الأصلي،
+// وإن لم يوجد في الشهر الهدف يُقرَّب إلى آخر يوم فيه
+function addMonthsHijri(date, n) {
+  const h = gregToHijriParts(toDate(date));
+  const total = h.y * 12 + (h.m - 1) + n;
+  const ty = Math.floor(total / 12);
+  const tm = (total % 12) + 1;
+  let td = h.d;
+  let g = hijriToGregorian(ty, tm, td);
+  while (!g && td > 28) { td--; g = hijriToGregorian(ty, tm, td); }
+  return g;
+}
+
+// خطوة الأشهر حسب تقويم العقد: هجرية للعقود الهجرية، وميلادية لغيرها
+function stepMonths(contract, date, n) {
+  if (contract && contract.calendar === 'hijri') return addMonthsHijri(date, n);
+  return addMonths(date, n);
+}
+
 function round2(x) {
   return Math.round((Number(x) || 0) * 100) / 100;
 }
@@ -70,7 +131,9 @@ function normalizeOwnerName(name) {
 function rentPayments(payments) { return (payments || []).filter(isRentPayment); }
 function sumAmounts(list) { return (list || []).reduce((s, p) => s + (Number(p.amount) || 0), 0); }
 
-// تواريخ بداية فترات الاستحقاق من بداية العقد حتى نهاية الحد المعطى
+// تواريخ بداية فترات الاستحقاق من بداية العقد حتى نهاية الحد المعطى.
+// للعقود الهجرية تُحسب البدايات من أصل تاريخ البداية بأشهر هجرية
+// (بداية + ترتيب الفترة × أشهر الدورة هجرياً) فلا يتراكم انحراف اليوم.
 function periodStarts(contract, until) {
   const starts = [];
   const start = toDate(contract.start_date);
@@ -79,6 +142,16 @@ function periodStarts(contract, until) {
   const endLimit = contract.end_date ? toDate(contract.end_date) : null;
   let limit = toDate(until) || today();
   if (endLimit && endLimit < limit) limit = endLimit;
+  if (contract.calendar === 'hijri') {
+    let i = 0;
+    while (i < 1200) {
+      const cur = stepMonths(contract, start, i * step);
+      if (!cur || cur > limit) break;
+      starts.push(cur);
+      i++;
+    }
+    return starts;
+  }
   let cur = start;
   let guard = 0;
   while (cur <= limit && guard < 1200) {
@@ -147,7 +220,7 @@ function contractSummary(contract, payments, asOf) {
       if (!start) return null;
       if (dueCount >= n) return null;
       const step = CYCLE_MONTHS[contract.cycle] || 1;
-      const next = addMonths(start, dueCount * step);
+      const next = stepMonths(contract, start, dueCount * step);
       if (contract.end_date && next > toDate(contract.end_date)) return null;
       return fmtDate(next);
     })(),
@@ -201,7 +274,14 @@ function paymentPeriod(contract, payment) {
   starts.forEach((s, i) => { if (s <= payDate) idx = i; });
   if (idx > n - 1) idx = n - 1;
   const from = starts[Math.min(idx, starts.length - 1)];
-  let to = addDays(addMonths(from, step), -1);
+  // نهاية الفترة = بداية الفترة التالية − يوم؛ للعقود الهجرية تُحسب بداية
+  // الفترة التالية من أصل العقد (لا من بداية هذه الفترة) تفادياً لانحراف اليوم
+  let to;
+  if (contract.calendar === 'hijri') {
+    to = addDays(stepMonths(contract, start, (idx + 1) * step), -1);
+  } else {
+    to = addDays(addMonths(from, step), -1);
+  }
   if (contract.end_date) {
     const e = toDate(contract.end_date);
     if (to > e) to = e;
@@ -218,7 +298,7 @@ function installmentSchedule(contract) {
   const step = CYCLE_MONTHS[contract.cycle] || 1;
   return amounts.map((amount, i) => ({
     index: i + 1,
-    due_date: fmtDate(addMonths(start, i * step)),
+    due_date: fmtDate(stepMonths(contract, start, i * step)),
     amount,
   }));
 }
@@ -273,7 +353,9 @@ function installmentPeriod(contract, k) {
   if (!e) return null;
   const step = CYCLE_MONTHS[contract.cycle] || 1;
   const from = toDate(e.due_date);
-  let to = addDays(addMonths(from, step), -1);
+  // نهاية فترة القسط = بداية القسط التالي في الجدول − يوم (أو خطوة من بدايته للأخير)
+  const next = schedule[k] ? toDate(schedule[k].due_date) : stepMonths(contract, from, step);
+  let to = addDays(next, -1);
   if (contract.end_date) {
     const en = toDate(contract.end_date);
     if (to > en) to = en;

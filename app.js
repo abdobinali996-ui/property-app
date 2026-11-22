@@ -161,6 +161,31 @@ function contractDateDisp(c, iso) {
   if (!iso) return '';
   return c && c.calendar === 'hijri' ? fmtHijriFull(iso) : iso;
 }
+// إضافة أشهر هجرية إلى تاريخ ISO: يُثبَّت يوم الشهر الهجري الأصلي، وإن لم
+// يوجد في الشهر الهدف يُقرَّب إلى آخر يوم فيه (مرآة منطق الخادم في calc)
+function addMonthsHijriStr(iso, n) {
+  const dt = isoToLocalDate(iso);
+  if (!dt) return iso;
+  const h = gregToHijriParts(dt);
+  const total = h.y * 12 + (h.m - 1) + n;
+  const ty = Math.floor(total / 12), tm = (total % 12) + 1;
+  let td = h.d;
+  let g = hijriToIso(ty, tm, td);
+  while (!g && td > 28) { td--; g = hijriToIso(ty, tm, td); }
+  return g || iso;
+}
+// خطوة الأشهر حسب تقويم العقد (هجرية للعقود الهجرية) — تواريخ الاستحقاق والفترات
+function stepMonthsStr(contract, iso, n) {
+  return contract && contract.calendar === 'hijri' ? addMonthsHijriStr(iso, n) : addMonthsStr(iso, n);
+}
+// عدد فترات الاستحقاق بين تاريخين لعقد هجري (بدايات الفترات من أصل البداية)
+function periodCountHijriStr(startStr, endStr, cycle) {
+  if (!startStr || !endStr || endStr < startStr) return 0;
+  const step = CYCLE_MONTHS_F[cycle] || 1;
+  let count = 0, i = 0;
+  while (i < 1200) { if (addMonthsHijriStr(startStr, i * step) > endStr) break; count++; i++; }
+  return count;
+}
 // ==== نهاية تحويل هجري/ميلادي ====
 
 // ==== وقت الإصدار (من الطابع الزمني created_at) بتوقيت الرياض ====
@@ -957,7 +982,10 @@ function contractForm(id, prefill) {
     });
     if (calSel.value === 'hijri') applyCal();
     const autoCount = () => {
-      const n = periodCountStr(startEl.value, endEl.value, cycleEl.value);
+      // لعقد هجري تُعدّ الفترات بأشهر هجرية (السنة الهجرية أقصر من الميلادية)
+      const n = calSel.value === 'hijri'
+        ? periodCountHijriStr(startEl.value, endEl.value, cycleEl.value)
+        : periodCountStr(startEl.value, endEl.value, cycleEl.value);
       return n > 0 ? n : (CYCLE_YEAR_COUNT_F[cycleEl.value] || 12);
     };
     let countTouched = c.installments_count != null && Number(c.installments_count) !== autoCount();
@@ -974,6 +1002,7 @@ function contractForm(id, prefill) {
     };
     const onDates = () => { if (!countTouched) countEl.value = autoCount(); refreshHint(); };
     [startEl, endEl, cycleEl].forEach((el) => el.addEventListener('change', onDates));
+    calSel.addEventListener('change', onDates);
     rentEl.addEventListener('input', refreshHint);
     countEl.addEventListener('input', () => { countTouched = true; refreshHint(); });
     refreshHint();
@@ -1138,17 +1167,28 @@ function defaultPeriodClient(contract, paymentDateStr) {
   if (!contract || !contract.start_date) return null;
   const step = CYCLE_MONTHS_F[contract.cycle] || 1;
   const payDate = paymentDateStr || todayStr();
-  const limit = contract.end_date || addMonthsStr(payDate, step);
+  const limit = contract.end_date || stepMonthsStr(contract, payDate, step);
   const starts = [];
-  let cur = contract.start_date;
-  while (cur <= limit && starts.length < 1200) { starts.push(cur); cur = addMonthsStr(cur, step); }
+  if (contract.calendar === 'hijri') {
+    // بدايات الفترات من أصل البداية بأشهر هجرية — بلا انحراف متراكم لليوم
+    let i = 0;
+    while (i < 1200) { const cur = addMonthsHijriStr(contract.start_date, i * step); if (cur > limit) break; starts.push(cur); i++; }
+  } else {
+    let cur = contract.start_date;
+    while (cur <= limit && starts.length < 1200) { starts.push(cur); cur = addMonthsStr(cur, step); }
+  }
   if (!starts.length) starts.push(contract.start_date);
   let idx = 0;
   starts.forEach((s, i) => { if (s <= payDate) idx = i; });
   const total = Number(contract.installments_total) || 0;
   if (total > 0 && idx > total - 1) idx = total - 1;
   const from = starts[Math.min(idx, starts.length - 1)];
-  let to = addDaysStr(addMonthsStr(from, step), -1);
+  let to;
+  if (contract.calendar === 'hijri') {
+    to = addDaysStr(addMonthsHijriStr(contract.start_date, (idx + 1) * step), -1);
+  } else {
+    to = addDaysStr(addMonthsStr(from, step), -1);
+  }
   if (contract.end_date && to > contract.end_date) to = contract.end_date;
   return { period_from: from, period_to: to };
 }
@@ -1197,6 +1237,14 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     </div>
     <label>طريقة الدفع<select name="method">${PAY_METHODS.map((m) => `<option ${editPayment && editPayment.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
     <label>المقابل (الغرض)<select name="purpose">${PAY_PURPOSES.map((x) => `<option ${x === (editPayment ? (editPayment.purpose || 'إيجار') : 'إيجار') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+    <div id="svcPeriod" class="hidden">
+      <span class="muted" style="display:block;margin-bottom:4px">مدة الخدمة — تُضبط فترة السداد من تاريخ الدفع:</span>
+      <div class="chips">
+        <button type="button" class="chip" data-svc-months="3">٣ شهور</button>
+        <button type="button" class="chip" data-svc-months="6">٦ شهور</button>
+        <button type="button" class="chip" data-svc-months="12">سنة</button>
+      </div>
+    </div>
     <p class="muted" style="margin:0">تنبيه: دفعات الإيجار فقط تُحتسب في الأقساط والمتأخرات؛ وباقي الأغراض تحصيلات لا تُنقص متأخرات الإيجار، ودفعات «خدمات» لا تظهر في كشف حساب المالك.</p>
     <label>ملاحظات<input name="notes" value="${esc(editPayment ? (editPayment.notes || '') : '')}"></label>`,
     async (data) => {
@@ -1330,8 +1378,8 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     const installmentPeriodClient = (contract, k) => {
       if (!contract || !contract.start_date || !k) return null;
       const step = CYCLE_MONTHS_F[contract.cycle] || 1;
-      const from = addMonthsStr(contract.start_date, (k - 1) * step);
-      let to = addDaysStr(addMonthsStr(from, step), -1);
+      const from = stepMonthsStr(contract, contract.start_date, (k - 1) * step);
+      let to = addDaysStr(stepMonthsStr(contract, contract.start_date, k * step), -1);
       if (contract.end_date && to > contract.end_date) to = contract.end_date;
       return { period_from: from, period_to: to };
     };
@@ -1343,11 +1391,22 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       instEl.innerHTML = `<option value="">تلقائي — حسب ترتيب السندات</option>` + Array.from({ length: n }, (_, i) => `<option value="${i + 1}">القسط رقم ${i + 1}${amounts[i] != null ? ` — ${money(amounts[i])}` : ''}</option>`).join('');
       if ([...instEl.options].some((o) => o.value === cur)) instEl.value = cur;
     };
+    const svcBox = document.getElementById('svcPeriod');
     const syncPurpose = () => {
       const isRent = !purposeEl || purposeEl.value === 'إيجار';
       instEl.disabled = !isRent;
       if (!isRent) instEl.value = '';
+      // مدة الخدمة تظهر لسندات «خدمات» فقط (الخدمات دورية: ٣/٦/١٢ شهراً)
+      if (svcBox) svcBox.classList.toggle('hidden', !purposeEl || purposeEl.value !== 'خدمات');
     };
+    if (svcBox) svcBox.querySelectorAll('[data-svc-months]').forEach((btn) => btn.addEventListener('click', () => {
+      const months = Number(btn.dataset.svcMonths);
+      const from = dateEl.value || todayStr();
+      fromEl.value = from;
+      toEl.value = addDaysStr(addMonthsStr(from, months), -1);
+      periodTouched = true;
+      if (calEl.value === 'hijri') gregToHijriFill();
+    }));
     contractEl.addEventListener('change', fillInstallments);
     instEl.addEventListener('change', () => {
       if (periodTouched) return;
