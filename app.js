@@ -5,11 +5,23 @@
 const $ = (sel) => document.querySelector(sel);
 const main = () => $('#main');
 const token = () => sessionStorage.getItem('pm_token') || '';
-const money = (n) => `${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ر.س`;
+const money = (n) => `${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${CUR.label}`;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const todayStr = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 // طرق الدفع/السداد المتاحة في سندات القبض والصرف (تُحفظ كنص وتُطبع كما هي في السند)
-const PAY_METHODS = ['نقداً', 'تحويل بنكي', 'شبكة', 'شيك', 'منصة إيجار — لحساب المكتب', 'منصة إيجار — لحساب المالك'];
+const PAY_METHODS = ['نقداً', 'تحويل بنكي', 'شبكة', 'فودافون كاش', 'إنستاباي', 'محفظة إلكترونية', 'شيك', 'منصة إيجار — لحساب المكتب', 'منصة إيجار — لحساب المالك'];
+// إعداد البلد (من إعدادات المؤسسة): يضبط العملة والتفقيط والمنطقة الزمنية وترقيم الجوال الدولي
+const COUNTRY_PRESETS = {
+  sa: { label: 'ر.س', code: 'SAR', tz: 'Asia/Riyadh', words: { one: 'ريال سعودي واحد', two: 'ريالان سعوديان', few: 'ريالات سعودية', other: 'ريال سعودي', sub: 'هللة' } },
+  eg: { label: 'ج.م', code: 'EGP', tz: 'Africa/Cairo', words: { one: 'جنيه مصري واحد', two: 'جنيهان مصريان', few: 'جنيهات مصرية', other: 'جنيه مصري', sub: 'قرش' } },
+};
+let CUR = COUNTRY_PRESETS.sa;
+let CLOCK_TZ = 'Asia/Riyadh';
+function applyCountrySettings(settings) {
+  CUR = COUNTRY_PRESETS[(settings && settings.country) || 'sa'] || COUNTRY_PRESETS.sa;
+  CLOCK_TZ = CUR.tz;
+  initClockFormatters();
+}
 // أغراض الدفعات (مقابل السند): الإيجار فقط يؤثر في الأقساط والمتأخرات،
 // و«خدمات» مال المكتب نفسه فلا يظهر في كشف حساب المالك
 const PAY_PURPOSES = ['إيجار', 'خدمات', 'مياه', 'كهرباء', 'أخرى'];
@@ -65,16 +77,17 @@ function numberToArabicWords(num) {
 
 function tafqeet(amount) {
   const total = Math.round(Number(amount || 0) * 100);
-  const riyals = Math.floor(total / 100);
-  const halalas = total % 100;
-  let riyalText;
-  if (riyals === 0) riyalText = '';
-  else if (riyals === 1) riyalText = 'ريال سعودي واحد';
-  else if (riyals === 2) riyalText = 'ريالان سعوديان';
-  else if (riyals >= 3 && riyals <= 10) riyalText = `${numberToArabicWords(riyals)} ريالات سعودية`;
-  else riyalText = `${numberToArabicWords(riyals)} ريال سعودي`;
-  let text = riyalText;
-  if (halalas > 0) text += `${text ? ' و' : ''}${numberToArabicWords(halalas)} هللة`;
+  const units = Math.floor(total / 100);
+  const subs = total % 100;
+  const w = CUR.words;
+  let unitText;
+  if (units === 0) unitText = '';
+  else if (units === 1) unitText = w.one;
+  else if (units === 2) unitText = w.two;
+  else if (units >= 3 && units <= 10) unitText = `${numberToArabicWords(units)} ${w.few}`;
+  else unitText = `${numberToArabicWords(units)} ${w.other}`;
+  let text = unitText;
+  if (subs > 0) text += `${text ? ' و' : ''}${numberToArabicWords(subs)} ${w.sub}`;
   return `${text} فقط لا غير`;
 }
 
@@ -189,10 +202,16 @@ function periodCountHijriStr(startStr, endStr, cycle) {
 // ==== نهاية تحويل هجري/ميلادي ====
 
 // ==== وقت الإصدار (من الطابع الزمني created_at) بتوقيت الرياض ====
-const RIYADH_TZ = 'Asia/Riyadh';
-const fmtRiyadhDate = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: RIYADH_TZ, day: 'numeric', month: 'long', year: 'numeric' });
-const fmtRiyadhTime = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: RIYADH_TZ, hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
-const fmtRiyadhTimeHM = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: RIYADH_TZ, hour: 'numeric', minute: '2-digit', hour12: true });
+let fmtRiyadhDate, fmtRiyadhTime, fmtRiyadhTimeHM, fmtClockWeekday, fmtClockHijri, fmtClockTime;
+function initClockFormatters() {
+  fmtRiyadhDate = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, day: 'numeric', month: 'long', year: 'numeric' });
+  fmtRiyadhTime = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+  fmtRiyadhTimeHM = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, hour: 'numeric', minute: '2-digit', hour12: true });
+  fmtClockWeekday = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, weekday: 'long' });
+  fmtClockHijri = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', { timeZone: CLOCK_TZ, day: 'numeric', month: 'long', year: 'numeric' });
+  fmtClockTime = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+}
+initClockFormatters();
 // معلومات إصدار سجل: من created_at إن وُجد (تاريخ + وقت الرياض)، وإلا من تاريخ
 // السند نفسه بلا وقت — لا يُختلق وقت أبداً لسجل قديم بلا طابع زمني.
 // تُرجع null إن لم يوجد أي تاريخ صالح.
@@ -388,6 +407,7 @@ async function refreshCache() {
     api('/api/settings').catch(() => ({})),
   ]);
   CACHE = { properties, units, tenants, contracts, settings };
+  applyCountrySettings(CACHE.settings);
 }
 const propName = (id) => (CACHE.properties.find((p) => p.id === Number(id)) || {}).name || '';
 const unitName = (id) => (CACHE.units.find((u) => u.id === Number(id)) || {}).name || '';
@@ -495,7 +515,7 @@ async function showCollectedDetails() {
       ${groups.map((g) => `<tr><td><strong>${esc(g.group)}</strong></td><td><strong>${g.count}</strong></td><td><strong>${money(g.total)}</strong></td></tr>${g.items.length > 1 ? g.items.map((x) => `<tr><td style="padding-right:22px">↳ ${esc(x.method)}</td><td>${x.count}</td><td>${money(x.total)}</td></tr>`).join('') : ''}`).join('')}
       <tr><td><strong>الإجمالي</strong></td><td><strong>${totCount}</strong></td><td><strong>${money(d.collected_this_month)}</strong></td></tr>
     </table></div>
-    <p class="muted">أقسام المحصّل هذا الشهر: نقدي، وبنك (تحويل بنكي وشبكة/مدى)، وشيك، ومنصة إيجار بفرعيها (لحساب المكتب / لحساب المالك).</p>`
+    <p class="muted">أقسام المحصّل هذا الشهر: نقدي، وبنك (تحويل بنكي وشبكة/مدى)، ومحافظ إلكترونية (فودافون كاش وإنستاباي)، وشيك، ومنصة إيجار بفرعيها (لحساب المكتب / لحساب المالك).</p>`
     : '<p class="muted">لا توجد تحصيلات هذا الشهر بعد.</p>');
 }
 
@@ -557,13 +577,14 @@ function normalizePhone(phone) {
   let p = String(phone || '').replace(/[\s\-()]/g, '');
   if (p.startsWith('+')) p = p.slice(1);
   if (/^05\d{8}$/.test(p)) p = '966' + p.slice(1);
+  else if (/^01\d{9}$/.test(p)) p = '20' + p.slice(1);
   return p.replace(/\D/g, '');
 }
 function reminderMessage({ company, tenantName, amount, unitName }) {
   return [
     `السلام عليكم ورحمة الله وبركاته، ${tenantName}`,
     company ? `معكم ${company}.` : 'معكم إدارة الأملاك.',
-    `نذكّركم بوجود مبلغ متأخر مستحق قدره ${amount} ر.س${unitName ? ` عن الوحدة (${unitName})` : ''}.`,
+    `نذكّركم بوجود مبلغ متأخر مستحق قدره ${amount} ${CUR.label}${unitName ? ` عن الوحدة (${unitName})` : ''}.`,
     'نرجو التكرم بالسداد في أقرب وقت ممكن، وشاكرين لكم حسن تعاونكم.',
   ].join('\n');
 }
@@ -572,7 +593,7 @@ function reminderMessageEn({ company, tenantName, amount, unitName, propertyName
   const place = unitName
     ? ` for unit ${unitName}${propertyName ? ` (${propertyName})` : ''}`
     : (propertyName ? ` for ${propertyName}` : '');
-  return `Dear ${tenantName}, ${from} This is a kind reminder that an amount of ${amount} SAR is overdue${place}. We would appreciate payment at your earliest convenience. Thank you.`;
+  return `Dear ${tenantName}, ${from} This is a kind reminder that an amount of ${amount} ${CUR.code} is overdue${place}. We would appreciate payment at your earliest convenience. Thank you.`;
 }
 function reminderMessageUr({ company, tenantName, amount, unitName, propertyName }) {
   const from = company ? `${company} کی جانب سے` : 'جائیداد انتظامیہ کی جانب سے';
@@ -588,15 +609,15 @@ function reminderMessageUr({ company, tenantName, amount, unitName, propertyName
 // رسائل التذكير المسبق (القسط لم يستحق بعد) — تنبيه ودي قبل الاستحقاق
 function preDueMessage({ company, amount, unitName, dueDate }) {
   const office = company || 'إدارة الأملاك';
-  return `تذكير ودي من ${office}: قسط الإيجار البالغ ${amount} ر.س${unitName ? ` للوحدة ${unitName}` : ''} يستحق بتاريخ ${dueDate}. شاكرين تعاونكم.`;
+  return `تذكير ودي من ${office}: قسط الإيجار البالغ ${amount} ${CUR.label}${unitName ? ` للوحدة ${unitName}` : ''} يستحق بتاريخ ${dueDate}. شاكرين تعاونكم.`;
 }
 function preDueMessageEn({ company, amount, unitName, dueDate }) {
   const office = company || 'the property management office';
-  return `Friendly reminder from ${office}: your rent installment of ${amount} SAR${unitName ? ` for unit ${unitName}` : ''} is due on ${dueDate}. Thank you for your cooperation.`;
+  return `Friendly reminder from ${office}: your rent installment of ${amount} ${CUR.code}${unitName ? ` for unit ${unitName}` : ''} is due on ${dueDate}. Thank you for your cooperation.`;
 }
 function preDueMessageUr({ company, amount, unitName, dueDate }) {
   const office = company || 'جائیداد انتظامیہ';
-  return `${office} کی جانب سے دوستانہ یاد دہانی: ${unitName ? `یونٹ ${unitName} کے ` : ''}کرایے کی قسط ${amount} ر.س بتاریخ ${dueDate} واجب الادا ہے۔ آپ کے تعاون کا شکریہ۔`;
+  return `${office} کی جانب سے دوستانہ یاد دہانی: ${unitName ? `یونٹ ${unitName} کے ` : ''}کرایے کی قسط ${amount} ${CUR.label} بتاریخ ${dueDate} واجب الادا ہے۔ آپ کے تعاون کا شکریہ۔`;
 }
 // اختيار القالب حسب الوضع: slots.mode = 'predue' قبل الاستحقاق،
 // وغير ذلك رسالة المتأخرات الحالية. الوضع يُحسم من تاريخ الاستحقاق.
@@ -761,7 +782,7 @@ function unitForm(id) {
     <label>اسم/رقم الوحدة *<input name="name" required value="${esc(u.name || '')}" placeholder="مثال: شقة 3"></label>
     <label>النوع<input name="type" value="${esc(u.type || 'شقة')}"></label>
     <label>الدور<input name="floor" value="${esc(u.floor || '')}"></label>
-    <label>الإيجار الافتراضي (ر.س)<input name="default_rent" type="number" step="0.01" min="0" value="${u.default_rent ?? 0}"></label>
+    <label>الإيجار الافتراضي (${CUR.label})<input name="default_rent" type="number" step="0.01" min="0" value="${u.default_rent ?? 0}"></label>
     <label>الحالة<select name="status">${['شاغرة', 'مؤجرة', 'صيانة'].map((s) => `<option ${u.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(u.notes || '')}</textarea></label>`,
     async (data) => { data.property_id = Number(data.property_id); data.default_rent = Number(data.default_rent || 0); id ? await api(`/api/units/${id}`, { method: 'PUT', body: JSON.stringify(data) }) : await api('/api/units', { method: 'POST', body: JSON.stringify(data) }); render(); });
@@ -906,11 +927,11 @@ function contractForm(id, prefill) {
         <input id="ceHy" name="ce_h_y" type="number" min="1300" max="1600" placeholder="السنة">
       </span></label>
     </div>
-    <label>إجمالي إيجار العقد (لكامل المدة) (ر.س) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
+    <label>إجمالي إيجار العقد (لكامل المدة) (${CUR.label}) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
     <label>دورة السداد<select name="cycle">${Object.entries(CYCLE_LABELS).map(([v, l]) => `<option value="${v}" ${c.cycle === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label>عدد الدفعات (الأقساط)<input name="installments_count" type="number" step="1" min="1" value="${c.installments_count ?? ''}" placeholder="يُحسب تلقائياً من المدة"></label>
     <p class="muted" id="ctHint" style="margin:-4px 0 10px"></p>
-    <label>التأمين (ر.س)<input name="deposit" type="number" step="0.01" min="0" value="${c.deposit ?? 0}"></label>
+    <label>التأمين (${CUR.label})<input name="deposit" type="number" step="0.01" min="0" value="${c.deposit ?? 0}"></label>
     <label>الحالة<select name="status"><option value="active" ${c.status === 'active' ? 'selected' : ''}>سارٍ</option><option value="renewed" ${c.status === 'renewed' ? 'selected' : ''}>مُجدَّد</option><option value="ended" ${c.status === 'ended' ? 'selected' : ''}>منتهٍ</option><option value="vacated" ${c.status === 'vacated' ? 'selected' : ''}>خرج وإخلاء</option></select></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(c.notes || '')}</textarea></label>`,
     async (data) => {
@@ -1231,7 +1252,7 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       <button type="button" class="chip" id="chipArrears" onclick="setPayAmount(${c0 ? c0.arrears : 0})">سداد المتأخرات: ${money(c0 ? c0.arrears : 0)}</button>
       <button type="button" class="chip" id="chipInstallment" onclick="setPayAmount(${c0 ? (c0.installment_amount ?? c0.rent_amount) : 0})">قيمة قسط واحد: ${money(c0 ? (c0.installment_amount ?? c0.rent_amount) : 0)}</button>
     </div>`}
-    <label>المبلغ (ر.س) *<input name="amount" id="payAmount" type="number" step="0.01" min="0.01" required value="${editPayment ? editPayment.amount : (presetAmount ?? '')}"></label>
+    <label>المبلغ (${CUR.label}) *<input name="amount" id="payAmount" type="number" step="0.01" min="0.01" required value="${editPayment ? editPayment.amount : (presetAmount ?? '')}"></label>
     <label>تاريخ الدفع<input name="payment_date" type="date" value="${editPayment ? String(editPayment.payment_date).slice(0, 10) : todayStr()}"></label>
     <label>تقويم فترة السداد<select name="period_cal" id="periodCal"><option value="greg" selected>ميلادي</option><option value="hijri">هجري</option></select></label>
     <div id="periodGreg">
@@ -1583,7 +1604,7 @@ async function expenseForm(id) {
     <label>الوحدة (اختياري)<select name="unit_id" id="expUnit"><option value="">— كل العقار —</option></select></label>
     <label>التصنيف<select name="category">${cats.map((c) => `<option ${e.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
     <label>اسم المستفيد<input name="payee" value="${esc(e.payee || '')}" placeholder="لمن صُرف المبلغ؟"></label>
-    <label>المبلغ (ر.س) *<input name="amount" type="number" step="0.01" min="0.01" required value="${e.amount ?? ''}"></label>
+    <label>المبلغ (${CUR.label}) *<input name="amount" type="number" step="0.01" min="0.01" required value="${e.amount ?? ''}"></label>
     <label>طريقة السداد<select name="payment_method">${methods.map((m) => `<option ${e.payment_method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
     <label>التاريخ<input name="expense_date" type="date" value="${esc(String(e.expense_date || todayStr()).slice(0, 10))}"></label>
     <label>الوصف<input name="description" value="${esc(e.description || '')}"></label>`,
@@ -2132,6 +2153,11 @@ async function viewSettings() {
         <label>العنوان<input name="company_address" value="${esc(s.company_address || '')}" placeholder="مثال: الرياض — حي الشميسي، شارع ..."></label>
         <label>أرقام الهواتف<input name="company_phones" value="${esc(s.company_phones || '')}" placeholder="مثال: 05xxxxxxxx — 011xxxxxxx"></label>
         <label>بيانات إضافية (سجل تجاري / رقم ضريبي…)<input name="company_extra" value="${esc(s.company_extra || '')}" placeholder="مثال: س.ت 1010xxxxxx"></label>
+        <label>البلد (العملة والمنطقة الزمنية)<select name="country">
+          <option value="sa" ${s.country !== 'eg' ? 'selected' : ''}>السعودية — ريال سعودي (ر.س)</option>
+          <option value="eg" ${s.country === 'eg' ? 'selected' : ''}>مصر — جنيه مصري (ج.م)</option>
+        </select></label>
+        <p class="muted" style="margin:0 0 10px">اختيار البلد يضبط العملة في السندات والتقارير والتفقيط، والمنطقة الزمنية لحساب «اليوم» والمتأخرات، ويضيف طرق دفع محلية (فودافون كاش وإنستاباي في مصر).</p>
         <label>شعار المكتب (صورة PNG أو JPG أو WebP — حتى 700 كيلوبايت)<input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp"></label>
         <div id="logoPreview" style="margin-bottom:10px"></div>
         <div class="form-actions"><button type="submit" class="btn primary">حفظ الإعدادات</button></div>
@@ -2187,6 +2213,7 @@ async function viewSettings() {
     try {
       await api('/api/settings', { method: 'PUT', body: JSON.stringify(data) });
       logoDirty = false;
+      await refreshCache().catch(() => {});
       const msg = $('#settingsMsg');
       msg.style.color = 'var(--ok)';
       msg.textContent = 'تم حفظ الإعدادات ✅';
@@ -2399,10 +2426,7 @@ function dhikrStart() {
 const dhikrToastEl = $('#dhikrToast');
 if (dhikrToastEl) dhikrToastEl.addEventListener('click', () => dhikrToastEl.classList.add('hidden'));
 
-// ---------------- ساعة الترويسة: التاريخ والوقت الآن (توقيت الرياض) ----------------
-const fmtClockWeekday = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: RIYADH_TZ, weekday: 'long' });
-const fmtClockHijri = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', { timeZone: RIYADH_TZ, day: 'numeric', month: 'long', year: 'numeric' });
-const fmtClockTime = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: RIYADH_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+// ---------------- ساعة الترويسة: التاريخ والوقت الآن (بتوقيت بلد الإعدادات) ----------------
 function tickHeaderClock() {
   const el = document.getElementById('headerClock');
   if (!el) return;

@@ -32,10 +32,14 @@ function addMonths(date, n) {
   return target;
 }
 
+// المنطقة الزمنية لحساب «اليوم» — تُضبط من إعداد البلد في الخادم (الافتراضي: الرياض)
+let TIMEZONE = 'Asia/Riyadh';
+function setTimezone(tz) { if (tz) TIMEZONE = tz; }
+
 function today() {
-  // «اليوم» دائماً بتقويم الرياض: الخادم قد يعمل بتوقيت UTC، فبدون هذا
-  // كان يوم المستخدم يبدأ عنده ٣ فجراً وتتأخر الأقساط المستحقة عن الظهور
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  // «اليوم» دائماً بتقويم منطقة البلد المختار: الخادم قد يعمل بتوقيت UTC، فبدون هذا
+  // كان يوم المستخدم يبدأ عنده متأخراً وتتأخر الأقساط المستحقة عن الظهور
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
   const g = (t) => Number(parts.find((p) => p.type === t).value);
   return new Date(g('year'), g('month') - 1, g('day'));
 }
@@ -422,7 +426,7 @@ function dueInMonth(contract, year, month) {
 
 module.exports = {
   CYCLE_MONTHS, CYCLE_LABELS, CYCLE_YEAR_COUNT, PAYMENT_PURPOSES,
-  toDate, fmtDate, addMonths, addDays, today, round2,
+  toDate, fmtDate, addMonths, addDays, today, setTimezone, round2,
   periodStarts, installmentsCount, installmentAmounts,
   contractSummary, dueInMonth, installmentInfo, paymentPeriod,
   installmentSchedule, nextUnpaidInstallment, installmentBalance,

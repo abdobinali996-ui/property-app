@@ -18,7 +18,7 @@ const ATTACHMENT_TYPES = ['tenant', 'contract', 'payment', 'expense'];
 const ATTACHMENT_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'];
 const ATTACHMENT_MAX = 3 * 1024 * 1024;
 
-const SETTING_KEYS = ['company_name', 'company_address', 'company_phones', 'company_extra', 'company_logo'];
+const SETTING_KEYS = ['company_name', 'company_address', 'company_phones', 'company_extra', 'company_logo', 'country'];
 
 const usePg = !!process.env.DATABASE_URL;
 let pool = null;
@@ -326,14 +326,14 @@ async function remove(table, id) {
 
 // ---------------- إعدادات المؤسسة ----------------
 async function getSettings() {
-  const out = { company_name: '', company_address: '', company_phones: '', company_extra: '', company_logo: '' };
+  const out = { company_name: '', company_address: '', company_phones: '', company_extra: '', company_logo: '', country: 'sa' };
   if (usePg) {
     const { rows } = await pool.query('SELECT key, value FROM settings');
     for (const r of rows) if (SETTING_KEYS.includes(r.key)) out[r.key] = r.value || '';
     return out;
   }
   const s = loadMem().settings || {};
-  for (const k of SETTING_KEYS) out[k] = s[k] || '';
+  for (const k of SETTING_KEYS) if (s[k] !== undefined) out[k] = s[k] || '';
   return out;
 }
 

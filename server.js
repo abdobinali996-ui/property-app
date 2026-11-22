@@ -255,7 +255,15 @@ async function enrichedContracts() {
 
 // ---------- سجل الحركات (تدقيق) ----------
 // كتابة السجل لا تعطّل العملية الأساسية أبداً: أي خطأ فيها يُبتلع بصمت.
-const moneyShort = (n) => `${Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ر.س`;
+// إعداد البلد: يضبط وسم العملة في النصوص والمنطقة الزمنية لحساب «اليوم»
+const COUNTRY_PRESETS = { sa: { label: 'ر.س', tz: 'Asia/Riyadh' }, eg: { label: 'ج.م', tz: 'Africa/Cairo' } };
+let CUR_LABEL = 'ر.س';
+function applyCountry(settings) {
+  const preset = COUNTRY_PRESETS[(settings && settings.country) || 'sa'] || COUNTRY_PRESETS.sa;
+  CUR_LABEL = preset.label;
+  calc.setTimezone(preset.tz);
+}
+const moneyShort = (n) => `${Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${CUR_LABEL}`;
 async function buildAuditSummary(entity, action, row) {
   const r = row || {};
   const verb = { create: 'إضافة', update: 'تعديل', delete: 'حذف' }[action] || action;
@@ -497,7 +505,7 @@ function receiptQrText({ payment, receipt_no, tenant, settings, verify_code }) {
     `سند قبض رقم ${String(receipt_no).padStart(4, '0')}`,
     settings && settings.company_name ? `المكتب: ${settings.company_name}` : null,
     `المستأجر: ${tenant ? tenant.name : ''}`,
-    `المبلغ: ${Number(payment.amount)} ر.س`,
+    `المبلغ: ${Number(payment.amount)} ${CUR_LABEL}`,
     `التاريخ: ${calc.fmtDate(payment.payment_date)}`,
     `طريقة الدفع: ${payment.method || ''}`,
     `رمز التحقق: ${verify_code}`,
@@ -596,6 +604,7 @@ app.put('/api/settings', auth, adminOnly, async (req, res) => {
       body.company_logo = `data:${m[1]};base64,${m[2].replace(/\s/g, '')}`;
     }
     const saved = await db.setSettings(body);
+    applyCountry(saved);
     await audit(req, 'settings', null, 'update', {});
     await takeSnapshot('auto');
     res.json(saved);
@@ -1137,7 +1146,7 @@ app.get('/api/owners/statement.xlsx', auth, async (req, res) => {
     if (s.company_extra) mergedCenter(s.company_extra, { size: 11, color: { argb: 'FF666666' } });
     mergedCenter('كشف حساب مالك — مجمّع (كل العقارات)', { bold: true, size: 16 });
     mergedCenter(`المالك: ${data.owner.name} · الفترة: من ${from} إلى ${to}`, { size: 11, color: { argb: 'FF666666' } });
-    mergedCenter(`الرصيد المستحق الحالي (لكل الفترات): ${calc.round2(data.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })} ر.س`, { bold: true, size: 12, color: { argb: 'FF0B5563' } });
+    mergedCenter(`الرصيد المستحق الحالي (لكل الفترات): ${calc.round2(data.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${CUR_LABEL}`, { bold: true, size: 12, color: { argb: 'FF0B5563' } });
     row++;
 
     const tableHeader = () => {
@@ -1253,11 +1262,12 @@ function groupMethodRows(byMethod) {
     const s = String(m || '');
     if (s.includes('منصة')) return 'منصة إيجار';
     if (s.includes('نقد')) return 'نقدي';
+    if (s.includes('فودافون') || s.includes('إنستاباي') || s.includes('محفظة')) return 'محافظ إلكترونية';
     if (s.includes('شيك')) return 'شيك';
     if (s.includes('بنك') || s.includes('تحويل') || s.includes('شبكة') || s.includes('مدى')) return 'بنك';
     return 'أخرى';
   };
-  const groupOrder = ['نقدي', 'بنك', 'شيك', 'منصة إيجار', 'أخرى'];
+  const groupOrder = ['نقدي', 'بنك', 'محافظ إلكترونية', 'شيك', 'منصة إيجار', 'أخرى'];
   const perGroup = new Map();
   for (const row of byMethod) {
     const g = methodGroupOf(row.method);
@@ -1842,6 +1852,7 @@ app.post('/api/import', auth, adminOnly, async (req, res) => {
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'ملف غير صالح' });
     await takeSnapshot('pre-import', { pinned: true }); // أمان مثبّتة من الحالة الحالية قبل تطبيق الاستيراد
     await db.importAll(data);
+    try { applyCountry(await db.getSettings()); } catch { /* تبقى الإعدادات الحالية */ }
     await takeSnapshot('auto'); // الاستيراد تغيير شامل — وثّقه بلقطة للحالة الجديدة
     res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1884,6 +1895,7 @@ app.post('/api/backups/:id/restore', auth, adminOnly, async (req, res) => {
     const data = (snap.data && snap.data.data) || snap.data;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'محتوى النسخة غير صالح' });
     await db.importAll(data);
+    try { applyCountry(await db.getSettings()); } catch { /* تبقى الإعدادات الحالية */ }
     await audit(req, 'backups', snap.id, 'restore', snap);
     await takeSnapshot('auto');
     res.json({ ok: true });
@@ -1897,7 +1909,8 @@ app.get('*', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 db.init()
-  .then(() => {
+  .then(async () => {
+    try { applyCountry(await db.getSettings()); } catch { /* الإعدادات الافتراضية تكفي */ }
     app.listen(PORT, () => {
       console.log(`Property management app running on port ${PORT} — database: ${db.usePg ? 'PostgreSQL' : 'local JSON (demo)'}`);
     });
