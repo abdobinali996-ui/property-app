@@ -913,7 +913,8 @@ function receiptWhatsAppText(r) {
   ];
   if (p.period_from && p.period_to) lines.push(`فترة السداد: من ${p.period_from} إلى ${p.period_to}.`);
   lines.push(`طريقة الدفع: ${p.method || ''}.`);
-  if (s.remaining_on_contract !== null && s.remaining_on_contract !== undefined) {
+  // المتبقي من العقد تفصيلة إيجارية: تظهر في رسالة سندات الإيجار فقط
+  if ((p.purpose || 'إيجار') === 'إيجار' && s.remaining_on_contract !== null && s.remaining_on_contract !== undefined) {
     lines.push(`المتبقي من كامل العقد: ${money(s.remaining_on_contract)}.`);
   }
   lines.push('شاكرين لكم حسن تعاونكم.');
@@ -1313,7 +1314,7 @@ async function showReceipt(paymentId, justCreated = false) {
         ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
         ${isRent ? `<tr><td>العقد</td><td>من ${esc(r.contract ? r.contract.start_date : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(r.contract.end_date) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>` : ''}
         ${p.period_from && p.period_to ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
-        ${r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
+        ${isRent && r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
         <tr><td>المبلغ المستلم</td><td><strong>${money(p.amount)}</strong></td></tr>
         <tr><td>طريقة الدفع</td><td>${esc(p.method)}</td></tr>
         <tr><td>مقابل</td><td>${esc(p.purpose || 'إيجار')}</td></tr>
