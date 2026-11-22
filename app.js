@@ -1195,7 +1195,7 @@ async function showReceipt(paymentId, justCreated = false) {
         ${r.issued_by ? `<tr><td>أصدره</td><td>${esc(r.issued_by)}</td></tr>` : ''}
         ${p.notes ? `<tr><td>ملاحظات</td><td>${esc(p.notes)}</td></tr>` : ''}
         <tr><td>إجمالي المدفوع على العقد</td><td class="paid-green">${money(s.total_paid)}</td></tr>
-        ${r.installment_balance ? `<tr><td>باقي القسط رقم ${r.installment_balance.index} من ${r.installment_balance.total}</td><td class="${r.installment_balance.status === 'متأخر' ? 'due-red' : ''}"><strong>${money(r.installment_balance.remaining)}</strong> (${r.installment_balance.status}${r.installment_balance.status === 'باقي' ? ` — يُستحق في ${esc(r.installment_balance.due_date)}` : ''})</td></tr>` : (r.installment ? `<tr><td>الأقساط</td><td class="paid-green"><strong>مسددة بالكامل ✓</strong></td></tr>` : '')}
+        ${r.installment_balance ? `<tr><td>باقي القسط رقم ${r.installment_balance.index} من ${r.installment_balance.total}</td><td class="due-red"><strong>${money(r.installment_balance.remaining)}</strong> (${r.installment_balance.status}${r.installment_balance.status === 'باقي' ? ` — يُستحق في ${esc(r.installment_balance.due_date)}` : ''})</td></tr>` : (r.installment ? `<tr><td>الأقساط</td><td class="paid-green"><strong>مسددة بالكامل ✓</strong></td></tr>` : '')}
         <tr><td>المتبقي المستحق (متأخرات)</td><td class="due-red">${money(s.arrears)}</td></tr>
         ${s.remaining_on_contract !== null && s.remaining_on_contract !== undefined ? `<tr><td>المتبقي من كامل العقد</td><td class="due-red">${money(s.remaining_on_contract)}</td></tr>` : ''}
       </table>

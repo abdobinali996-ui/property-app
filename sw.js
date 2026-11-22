@@ -1,5 +1,5 @@
 // Service Worker — يخزّن ملفات الواجهة للفتح السريع، والبيانات دائماً من الخادم
-const CACHE = 'pm-app-v21';
+const CACHE = 'pm-app-v22';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'qrcode.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'dhikr-istighfar.mp3', 'dhikr-salawat.mp3'];
 
 self.addEventListener('install', (e) => {
