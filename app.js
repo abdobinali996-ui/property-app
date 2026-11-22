@@ -472,14 +472,15 @@ async function showDuesDetails() {
   const totOwed = rows.reduce((s, r) => s + (Number(r.owed_now) || 0), 0);
   openModal('المستحقات والمتأخرات — عند مين؟', rows.length ? `
     <div class="table-wrap"><table>
-      <tr><th>المستأجر</th><th>الوحدة</th><th>العقار</th><th>الإجمالي المستحق عليه</th><th></th></tr>
+      <tr><th>المستأجر</th><th>الوحدة</th><th>العقار</th><th>المستحق عليه الآن</th><th>القسط القادم</th><th></th></tr>
       ${rows.map((r) => `<tr><td>${esc(r.tenant_name)}</td><td>${esc(r.unit_name)}</td><td>${esc(r.property_name)}</td>
-        <td class="arrears"><strong>${money(r.owed_now)}</strong></td>
-        <td><button class="btn small primary" onclick="closeModal(); paymentForm(${r.contract_id}, ${r.owed_now > 0 ? r.owed_now : r.due_remaining})">تسجيل دفعة</button>${r.arrears > 0 ? ' ' + reminderBtn(r.tenant_id, r.arrears) : ''}</td></tr>`).join('')}
-      <tr><td colspan="3"><strong>الإجمالي</strong></td><td class="arrears"><strong>${money(totOwed)}</strong></td><td></td></tr>
+        <td class="${r.owed_now > 0 ? 'arrears' : ''}"><strong>${money(r.owed_now)}</strong></td>
+        <td>${r.next_due_date ? `${money(r.next_remaining)} — يستحق ${esc(r.next_due_date)}` : 'مسدد بالكامل ✓'}</td>
+        <td><button class="btn small primary" onclick="closeModal(); paymentForm(${r.contract_id}, ${r.owed_now > 0 ? r.owed_now : r.next_remaining})">تسجيل دفعة</button>${r.arrears > 0 ? ' ' + reminderBtn(r.tenant_id, r.arrears) : ''}</td></tr>`).join('')}
+      <tr><td colspan="3"><strong>الإجمالي المستحق الآن</strong></td><td class="arrears"><strong>${money(totOwed)}</strong></td><td></td><td></td></tr>
     </table></div>
-    <p class="muted">«الإجمالي المستحق عليه» = كل الأقساط التي بدأ موعدها حتى اليوم ولم تُدفع بعد، لكل مستأجر على حدة.</p>`
-    : '<p class="muted">لا توجد مستحقات أو متأخرات حالياً — ممتاز 🎉</p>');
+    <p class="muted">القائمة تشمل كل المستأجرين بعقود سارية. «المستحق عليه الآن» = أقساط بدأ موعدها ولم تُدفع. «القسط القادم» = أول قسط غير مسدد بالكامل وموعد استحقاقه.</p>`
+    : '<p class="muted">لا توجد عقود سارية حالياً.</p>');
 }
 
 // تفصيل «المحصّل هذا الشهر» عند الضغط على بطاقته: كام كاش وكام بنك وكام

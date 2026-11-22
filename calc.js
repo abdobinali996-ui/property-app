@@ -33,8 +33,11 @@ function addMonths(date, n) {
 }
 
 function today() {
-  const t = new Date();
-  return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  // «اليوم» دائماً بتقويم الرياض: الخادم قد يعمل بتوقيت UTC، فبدون هذا
+  // كان يوم المستخدم يبدأ عنده ٣ فجراً وتتأخر الأقساط المستحقة عن الظهور
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const g = (t) => Number(parts.find((p) => p.type === t).value);
+  return new Date(g('year'), g('month') - 1, g('day'));
 }
 
 function addDays(date, n) {

@@ -1679,7 +1679,7 @@ app.get('/api/dashboard', auth, async (req, res) => {
   try {
     const contracts = await enrichedContracts();
     const payments = await db.list('payments');
-    const now = new Date();
+    const now = calc.today(); // يوم الرياض — لا يوم الخادم
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const collectedThisMonth = payments
       .filter((p) => calc.fmtDate(p.payment_date).startsWith(ym))
@@ -1750,15 +1750,20 @@ app.get('/api/dashboard', auth, async (req, res) => {
       // الإجمالي المستحق عليه فعلياً الآن: أقساط بدأت حتى اليوم − المدفوع،
       // ويشمل باقي قسط بدأ ولم يحن تأخيره بعد (لا يظهر في حساب الشهر وحده)
       const owedNow = calc.round2(Math.max(0, (Number(c.total_due) || 0) - (Number(c.total_paid) || 0)));
-      if (dueRemaining <= 0 && !(c.arrears > 0) && owedNow <= 0) continue;
+      // القائمة تشمل كل العقود السارية (عبده: «ادوس عالمستحق يطلع اسماء
+      // المستأجرين») — مع أول قسط غير مسدد بالكامل وموعد استحقاقه لكل عقد
+      const next = calc.nextUnpaidInstallment(c, paysByContract[c.id] || []);
       duesList.push({
         contract_id: c.id, tenant_id: c.tenant_id, tenant_name: c.tenant_name,
         unit_name: c.unit_name, property_name: c.property_name,
         due_this_month: dueMonth, due_remaining: dueRemaining, arrears: c.arrears || 0,
         owed_now: owedNow,
+        next_due_date: next ? next.due_date : null,
+        next_remaining: next ? next.remaining : 0,
       });
     }
-    duesList.sort((a, b) => (b.arrears - a.arrears) || (b.owed_now - a.owed_now) || (b.due_remaining - a.due_remaining));
+    duesList.sort((a, b) => (b.owed_now - a.owed_now) || (b.arrears - a.arrears)
+      || String(a.next_due_date || '9999').localeCompare(String(b.next_due_date || '9999')));
     // تفصيل محصّل هذا الشهر حسب أقسام طريقة الدفع (نقدي/بنك/شيك/منصة بفرعيها/أخرى)
     const perMethodDash = new Map();
     for (const p of payments) {
