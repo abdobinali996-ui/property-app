@@ -378,6 +378,7 @@ async function viewDashboard() {
       <div class="card"><div class="lbl">مستأجرون / عقود سارية</div><div class="num">${d.counts.tenants} / ${d.counts.active_contracts}</div></div>
       <div class="card"><div class="lbl">عدد المستأجرين</div><div class="num">${d.tenants_count ?? d.counts.tenants}</div></div>
       <div class="card"><div class="lbl">عدد الملاك</div><div class="num">${d.owners_count ?? 0}</div></div>
+      <div class="card good"><div class="lbl">رصيد المكتب (خدمات − مصروفات المكتب)</div><div class="num">${money(d.office_balance ?? 0)}</div></div>
     </div>
 
     <div class="section">
@@ -1219,7 +1220,7 @@ async function viewExpenses() {
     <div class="section">
       <div class="section-head"><h3>المصروفات</h3><button class="btn primary" onclick="expenseForm()">+ إضافة مصروف</button></div>
       ${sorted.length ? `<div class="table-wrap"><table><tr><th>رقم السند</th><th>التاريخ</th><th>العقار</th><th>الوحدة</th><th>التصنيف</th><th>المستفيد</th><th>الوصف</th><th>المبلغ</th><th></th></tr>
-        ${sorted.map((e) => `<tr><td><strong>${e.voucher_no ? String(e.voucher_no).padStart(4, '0') : '—'}</strong></td><td>${esc(String(e.expense_date).slice(0, 10))}</td><td>${esc(propName(e.property_id))}</td><td>${esc(e.unit_id ? unitName(e.unit_id) : '—')}</td>
+        ${sorted.map((e) => `<tr><td><strong>${e.voucher_no ? String(e.voucher_no).padStart(4, '0') : '—'}</strong></td><td>${esc(String(e.expense_date).slice(0, 10))}</td><td>${esc(e.property_id ? propName(e.property_id) : 'المكتب')}</td><td>${esc(e.unit_id ? unitName(e.unit_id) : '—')}</td>
           <td><span class="badge">${esc(e.category)}</span></td><td>${esc(e.payee || '')}</td><td>${esc(e.description || '')}</td><td class="money">${money(e.amount)}</td>
           <td><button class="btn small" onclick="showExpenseVoucher(${e.id})">سند الصرف</button>
           <button class="btn small" onclick="showAttachments('expense', ${e.id}, 'سند الصرف')">📎</button>
@@ -1246,7 +1247,7 @@ async function viewVouchers() {
   const draw = (list) => {
     const total = list.reduce((s, e) => s + Number(e.amount || 0), 0);
     $('#vchTable').innerHTML = (list.length ? `<div class="table-wrap"><table><tr><th>رقم السند</th><th>التاريخ</th><th>المستفيد</th><th>العقار</th><th>الوحدة</th><th>التصنيف</th><th>المبلغ</th><th>طريقة الدفع</th><th>أصدره</th><th></th></tr>
-      ${list.map((e) => `<tr><td><strong>${e.voucher_no ? String(e.voucher_no).padStart(4, '0') : '—'}</strong></td><td>${esc(String(e.expense_date).slice(0, 10))}${issuedTimeHM(e.created_at) ? `<div class="muted" style="font-size:11px">🕐 ${esc(issuedTimeHM(e.created_at))}</div>` : ''}</td><td>${esc(e.payee || '')}</td><td>${esc(propName(e.property_id))}</td><td>${esc(e.unit_id ? unitName(e.unit_id) : '—')}</td>
+      ${list.map((e) => `<tr><td><strong>${e.voucher_no ? String(e.voucher_no).padStart(4, '0') : '—'}</strong></td><td>${esc(String(e.expense_date).slice(0, 10))}${issuedTimeHM(e.created_at) ? `<div class="muted" style="font-size:11px">🕐 ${esc(issuedTimeHM(e.created_at))}</div>` : ''}</td><td>${esc(e.payee || '')}</td><td>${esc(e.property_id ? propName(e.property_id) : 'المكتب')}</td><td>${esc(e.unit_id ? unitName(e.unit_id) : '—')}</td>
       <td><span class="badge">${esc(e.category)}</span></td><td class="money">${money(e.amount)}</td><td>${esc(e.payment_method || '')}</td><td>${esc(e.created_by || '')}</td>
       <td><button class="btn small" onclick="showExpenseVoucher(${e.id})">عرض السند</button></td></tr>`).join('')}</table></div>`
       : '<p class="muted">لا توجد سندات مطابقة.</p>')
@@ -1273,7 +1274,7 @@ async function expenseForm(id) {
   const cats = ['صيانة', 'كهرباء', 'مياه', 'مرافق', 'سباكة', 'لياسة', 'بويات ودهانات', 'نجارة', 'تكييف', 'مصعد', 'زجاج وألمنيوم', 'مواد بناء', 'أجور عمال', 'نظافة', 'حراسة', 'عمولات', 'نقل ومشال', 'دفعة للمالك', 'أخرى'];
   const methods = PAY_METHODS;
   formModal(id ? 'تعديل مصروف' : 'إضافة مصروف', `
-    <label>العقار *<select name="property_id" id="expProperty">${CACHE.properties.map((p) => `<option value="${p.id}" ${e.property_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+    <label>العقار<select name="property_id" id="expProperty"><option value="" ${id && e.property_id == null ? 'selected' : ''}>— مصروف مكتب (بدون عقار) —</option>${CACHE.properties.map((p) => `<option value="${p.id}" ${e.property_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
     <label>الوحدة (اختياري)<select name="unit_id" id="expUnit"><option value="">— كل العقار —</option></select></label>
     <label>التصنيف<select name="category">${cats.map((c) => `<option ${e.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
     <label>اسم المستفيد<input name="payee" value="${esc(e.payee || '')}" placeholder="لمن صُرف المبلغ؟"></label>
@@ -1282,7 +1283,8 @@ async function expenseForm(id) {
     <label>التاريخ<input name="expense_date" type="date" value="${esc(String(e.expense_date || todayStr()).slice(0, 10))}"></label>
     <label>الوصف<input name="description" value="${esc(e.description || '')}"></label>`,
     async (data) => {
-      data.property_id = Number(data.property_id); data.amount = Number(data.amount);
+      data.property_id = data.property_id ? Number(data.property_id) : null; data.amount = Number(data.amount);
+      if (!data.property_id) data.unit_id = '';
       data.unit_id = data.unit_id ? Number(data.unit_id) : null;
       const saved = id ? await api(`/api/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) }) : await api('/api/expenses', { method: 'POST', body: JSON.stringify(data) });
       render();
@@ -1311,7 +1313,7 @@ async function showExpenseVoucher(expenseId, justCreated = false) {
         <tr><td>طريقة السداد</td><td>${esc(e.payment_method || 'نقداً')}</td></tr>
         ${r.issued_by ? `<tr><td>أصدره</td><td>${esc(r.issued_by)}</td></tr>` : ''}
         <tr><td>التصنيف / سبب الصرف</td><td>${esc(e.category)}${e.description ? ' — ' + esc(e.description) : ''}</td></tr>
-        ${r.property ? `<tr><td>العقار / الوحدة</td><td>${esc(r.property.name)}${r.unit ? ' — ' + esc(r.unit.name) : ''}</td></tr>` : ''}
+        <tr><td>العقار / الوحدة</td><td>${r.property ? esc(r.property.name) + (r.unit ? ' — ' + esc(r.unit.name) : '') : 'المكتب'}</td></tr>
       </table>
       <div class="amount-words">المبلغ بالحروف: ${esc(tafqeet(e.amount))}</div>
       <div class="signatures"><div>المستلم: ____________</div><div>المحاسب: ____________</div><div>الاعتماد: ____________</div></div>
@@ -1643,6 +1645,11 @@ async function loadMonthly() {
         <div class="card warn"><div class="lbl">إجمالي المصروفات (${r.expenses_count})</div><div class="num" style="font-size:18px">${money(r.total_expenses)}</div></div>
         <div class="card"><div class="lbl">الصافي</div><div class="num" style="font-size:18px">${money(r.net)}</div></div>
       </div>
+      ${r.office ? `<h4>رصيد المكتب</h4>
+      <table><tr><th>البند</th><th>هذا الشهر</th><th>التراكمي (منذ البداية)</th></tr>
+      <tr><td>تحصيل «خدمات» — دخل المكتب</td><td class="paid-green">${money(r.office.services_month)}</td><td>${money(r.office.services_total)}</td></tr>
+      <tr><td>مصروفات المكتب (بدون عقار)</td><td class="due-red">${money(r.office.expenses_month)}</td><td>${money(r.office.expenses_total)}</td></tr>
+      <tr><td><strong>رصيد المكتب</strong></td><td><strong>${money(r.office.month_net)}</strong></td><td><strong>${money(r.office.balance)}</strong></td></tr></table>` : ''}
       <h4>حسب العقار</h4>
       ${r.by_property.length ? `<table><tr><th>العقار</th><th>المحصّل</th><th>المصروفات</th><th>الصافي</th></tr>
       ${r.by_property.map((x) => `<tr><td>${esc(x.property_name)}</td><td>${money(x.collected)}</td><td>${money(x.expenses)}</td><td><strong>${money(x.net)}</strong></td></tr>`).join('')}

@@ -1297,11 +1297,23 @@ app.get('/api/reports/monthly', auth, async (req, res) => {
 
     const totalCollected = calc.round2(monthPayments.reduce((s, p) => s + Number(p.amount || 0), 0));
     const totalExpenses = calc.round2(monthExpenses.reduce((s, e) => s + Number(e.amount || 0), 0));
+    // رصيد المكتب: دخل المكتب هو سندات قبض «خدمات» (مال المكتب نفسه)،
+    // ومصروفات المكتب هي المصروفات غير المرتبطة بعقار (property_id فارغ).
+    // الرصيد تراكمي منذ البداية، مع حركة الشهر منفصلة.
+    const office = {
+      services_month: calc.round2(monthPayments.filter((p) => calc.isOfficePayment(p)).reduce((s, p) => s + Number(p.amount || 0), 0)),
+      expenses_month: calc.round2(monthExpenses.filter((e) => e.property_id == null).reduce((s, e) => s + Number(e.amount || 0), 0)),
+      services_total: calc.round2(payments.filter((p) => calc.isOfficePayment(p)).reduce((s, p) => s + Number(p.amount || 0), 0)),
+      expenses_total: calc.round2(expenses.filter((e) => e.property_id == null).reduce((s, e) => s + Number(e.amount || 0), 0)),
+    };
+    office.month_net = calc.round2(office.services_month - office.expenses_month);
+    office.balance = calc.round2(office.services_total - office.expenses_total);
     res.json({
       month,
       total_collected: totalCollected,
       total_expenses: totalExpenses,
       net: calc.round2(totalCollected - totalExpenses),
+      office,
       payments_count: monthPayments.length,
       expenses_count: monthExpenses.length,
       by_property: byProperty,
@@ -1686,6 +1698,9 @@ app.get('/api/dashboard', auth, async (req, res) => {
       recent_payments: recentPayments,
       tenants_count: tenantsCount,
       owners_count: ownersCount,
+      office_balance: calc.round2(
+        payments.filter((p) => calc.isOfficePayment(p)).reduce((s, p) => s + Number(p.amount || 0), 0)
+        - (await db.list('expenses')).filter((e) => e.property_id == null).reduce((s, e) => s + Number(e.amount || 0), 0)),
       properties_count: propertiesList.length,
       units_count: unitsCount,
       counts: {
