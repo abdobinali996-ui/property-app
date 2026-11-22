@@ -206,14 +206,22 @@ function companyHeader(s) {
 }
 
 // ---------------- النافذة المنبثقة ----------------
+let modalDirtyCheck = null; // دالة تُرجع true إن وُجد إدخال غير محفوظ في نافذة نموذج مفتوحة
 function openModal(title, bodyHtml) {
+  modalDirtyCheck = null;
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = bodyHtml;
   $('#modalBackdrop').classList.remove('hidden');
 }
-function closeModal() { $('#modalBackdrop').classList.add('hidden'); $('#modalBody').innerHTML = ''; }
+function closeModal() {
+  if (modalDirtyCheck && modalDirtyCheck()) {
+    if (!window.confirm('لديك بيانات غير محفوظة — إغلاق النافذة بدون حفظ؟')) return;
+  }
+  modalDirtyCheck = null;
+  $('#modalBackdrop').classList.add('hidden'); $('#modalBody').innerHTML = '';
+}
 $('#modalClose').addEventListener('click', closeModal);
-$('#modalBackdrop').addEventListener('click', (e) => { if (e.target.id === 'modalBackdrop') closeModal(); });
+// لا إغلاق بالضغط خارج النافذة: ضغطة بالغلط لا تُضيّع ما يكتبه المستخدم أبداً — الإغلاق بزر ✕ أو إلغاء فقط
 
 function formModal(title, fieldsHtml, onSubmit, submitLabel = 'حفظ') {
   openModal(title, `<form id="modalForm">${fieldsHtml}
@@ -221,10 +229,15 @@ function formModal(title, fieldsHtml, onSubmit, submitLabel = 'حفظ') {
     <button type="button" class="btn" onclick="void(0)" id="modalCancel">إلغاء</button></div>
     <p class="error" id="formError"></p></form>`);
   $('#modalCancel').addEventListener('click', closeModal);
-  $('#modalForm').addEventListener('submit', async (e) => {
+  const formEl = $('#modalForm');
+  // لقطة الأساس بعد انتهاء تهيئة النموذج (بعض النماذج تملأ حقولاً تلقائياً فور فتحها)
+  let initialData = null;
+  setTimeout(() => { try { initialData = JSON.stringify(Object.fromEntries(new FormData(formEl).entries())); } catch (_) {} }, 0);
+  modalDirtyCheck = () => initialData !== null && JSON.stringify(Object.fromEntries(new FormData(formEl).entries())) !== initialData;
+  formEl.addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target).entries());
-    try { await onSubmit(data); closeModal(); } catch (err) { $('#formError').textContent = err.message; }
+    try { await onSubmit(data); modalDirtyCheck = null; closeModal(); } catch (err) { $('#formError').textContent = err.message; }
   });
 }
 
@@ -753,8 +766,8 @@ async function viewContracts() {
         ${CACHE.contracts.map((c) => `<tr><td><strong>${esc(c.tenant_name)}</strong></td><td>${esc(c.unit_name)} — ${esc(c.property_name)}</td>
           <td>${money(c.rent_amount)} <span class="muted">(إجمالي العقد)</span><br><span class="muted">القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</span></td>
           <td>${esc(c.start_date)}<br><span class="muted">${c.end_date ? 'إلى ' + esc(c.end_date) : 'مفتوح'}</span></td>
-          <td class="money">${money(c.total_paid)}</td><td>${money(c.total_due)}</td>
-          <td class="${c.arrears > 0 ? 'arrears' : ''}">${money(c.arrears)}</td>
+          <td class="money paid-green">${money(c.total_paid)}</td><td>${money(c.total_due)}</td>
+          <td class="${c.arrears > 0 ? 'arrears due-red' : ''}">${money(c.arrears)}</td>
           <td><span class="badge ${(CONTRACT_STATUS[c.status] || CONTRACT_STATUS.ended)[1]}">${(CONTRACT_STATUS[c.status] || CONTRACT_STATUS.ended)[0]}</span></td>
           <td><button class="btn small primary" onclick="paymentForm(${c.id})">+ سند</button>
           <button class="btn small" onclick="renewContract(${c.id})">🔄 تجديد</button>
@@ -940,18 +953,21 @@ async function viewPayments() {
       <div class="section-head"><h3>سندات القبض</h3><button class="btn primary" onclick="paymentForm()">+ إضافة سند قبض</button></div>
       <div class="search-row"><input id="payFilter" placeholder="تصفية بالاسم أو الوحدة أو رقم السند…"></div>
       <div id="payTable"></div>
+      <div style="margin-top:10px"><button class="btn" onclick="toggleTrash()">🗑️ السندات المحذوفة (قابلة للاسترجاع)</button></div>
+      <div id="payTrash" style="margin-top:8px"></div>
     </div>`;
   const draw = (list) => {
     $('#payTable').innerHTML = list.length ? `<div class="table-wrap"><table><tr><th>رقم السند</th><th>التاريخ</th><th>الفترة</th><th>المستأجر</th><th>الوحدة</th><th>المبلغ</th><th>الطريقة</th><th></th></tr>
       ${list.map((p) => { const c = contractById[p.contract_id] || {}; const t = CACHE.tenants.find((x) => x.id === c.tenant_id) || {}; const waBtn = t.phone
         ? `<button class="btn small" onclick="sendReceiptWhatsApp(${p.id})">📤 واتساب</button>`
-        : `<button class="btn small" disabled title="لا يوجد رقم جوال مسجل لهذا المستأجر — أضف الرقم من ملف المستأجر أولاً">📤 واتساب</button>`; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong></td><td>${esc(String(p.payment_date).slice(0, 10))}${issuedTimeHM(p.created_at) ? `<div class="muted" style="font-size:11px">🕐 ${esc(issuedTimeHM(p.created_at))}</div>` : ''}</td>
+        : `<button class="btn small" disabled title="لا يوجد رقم جوال مسجل لهذا المستأجر — أضف الرقم من ملف المستأجر أولاً">📤 واتساب</button>`; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong>${p.edit_count ? ' <span class="badge">معدّل</span>' : ''}</td><td>${esc(String(p.payment_date).slice(0, 10))}${issuedTimeHM(p.created_at) ? `<div class="muted" style="font-size:11px">🕐 ${esc(issuedTimeHM(p.created_at))}</div>` : ''}</td>
         <td class="muted" style="white-space:nowrap;font-size:12px">${p.period_from ? `${esc(String(p.period_from).slice(0, 10))} – ${esc(String(p.period_to || '').slice(0, 10))}` : '—'}</td>
         <td>${esc(c.tenant_name || '')}</td><td>${esc(c.unit_name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}</td>
         <td><button class="btn small" onclick="showReceipt(${p.id})">عرض/طباعة</button>
+        <button class="btn small" onclick="editPayment(${p.id})">تعديل</button>
         ${waBtn}
         <button class="btn small" onclick="showAttachments('payment', ${p.id}, 'سند القبض')">📎</button>
-        ${delBtn('payments', p.id, `سند ${String(p.receipt_no).padStart(4, '0')}`)}</td></tr>`; }).join('')}</table></div>`
+        ${delBtn('payments', p.id, `سند ${String(p.receipt_no).padStart(4, '0')} — سيُنقل إلى السندات المحذوفة ويمكن استرجاعه`)}</td></tr>`; }).join('')}</table></div>`
       : '<p class="muted">لا توجد سندات مطابقة.</p>';
   };
   draw(sorted);
@@ -959,6 +975,32 @@ async function viewPayments() {
     const q = e.target.value.trim();
     draw(sorted.filter((p) => { const c = contractById[p.contract_id] || {}; return !q || `${c.tenant_name} ${c.unit_name} ${p.receipt_no}`.includes(q); }));
   });
+}
+
+async function editPayment(id) {
+  try {
+    const p = await api(`/api/payments/${id}`);
+    paymentForm(null, null, p);
+  } catch (e) { alert(e.message); }
+}
+let trashOpen = false;
+async function toggleTrash() {
+  const box = $('#payTrash');
+  if (!box) return;
+  if (trashOpen) { box.innerHTML = ''; trashOpen = false; return; }
+  const trash = await api('/api/payments-trash');
+  trashOpen = true;
+  const contractById = Object.fromEntries(CACHE.contracts.map((c) => [c.id, c]));
+  box.innerHTML = trash.length ? `<div class="table-wrap"><table><tr><th>رقم السند</th><th>التاريخ</th><th>المستأجر</th><th>المبلغ</th><th>حُذف بتاريخ</th><th></th></tr>
+    ${trash.map((p) => { const c = contractById[p.contract_id] || {}; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong></td><td>${esc(String(p.payment_date).slice(0, 10))}</td><td>${esc(c.tenant_name || '')}</td><td class="money">${money(p.amount)}</td><td class="muted">${esc(String(p.deleted_at || '').slice(0, 10))}</td>
+    <td><button class="btn small" onclick="showReceipt(${p.id})">عرض</button>
+    <button class="btn small primary" onclick="restorePayment(${p.id})">↩️ استرجاع</button></td></tr>`; }).join('')}</table></div>`
+    : '<p class="muted">لا توجد سندات محذوفة.</p>';
+}
+async function restorePayment(id) {
+  await api(`/api/payments/${id}/restore`, { method: 'POST' });
+  trashOpen = false;
+  render();
 }
 
 function addDaysStr(dateStr, n) {
@@ -988,23 +1030,24 @@ function defaultPeriodClient(contract, paymentDateStr) {
   return { period_from: from, period_to: to };
 }
 
-async function paymentForm(contractId, presetAmount) {
+async function paymentForm(contractId, presetAmount, editPayment = null) {
   await refreshCache();
   const active = CACHE.contracts.filter((c) => c.status === 'active');
-  if (!active.length) {
+  if (!editPayment && !active.length) {
     openModal('إضافة سند قبض', '<p>لا يوجد عقد سارٍ بعد. خطوات البداية:</p><ol><li>أضف عقاراً من تبويب العقارات</li><li>أضف وحدة</li><li>أضف مستأجراً</li><li>أنشئ عقداً — وبعدها يصبح زر سند القبض جاهزاً</li></ol>');
     return;
   }
-  const sel = contractId || active[0].id;
-  const c0 = active.find((c) => c.id === sel);
-  formModal('إضافة سند قبض', `
-    <label>العقد (المستأجر — الوحدة) *<select name="contract_id" id="payContract">${active.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.tenant_name)} — ${esc(c.unit_name)} (${esc(c.property_name)})</option>`).join('')}</select></label>
-    <div class="chips">
+  const pool = editPayment ? CACHE.contracts : active;
+  const sel = editPayment ? editPayment.contract_id : (contractId || active[0].id);
+  const c0 = pool.find((c) => c.id === sel);
+  formModal(editPayment ? `تعديل سند قبض رقم ${String(editPayment.receipt_no || '').padStart(4, '0')}` : 'إضافة سند قبض', `
+    <label>العقد (المستأجر — الوحدة) *<select name="contract_id" id="payContract">${pool.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.tenant_name)} — ${esc(c.unit_name)} (${esc(c.property_name)})</option>`).join('')}</select></label>
+    ${editPayment ? '' : `<div class="chips">
       <button type="button" class="chip" onclick="setPayAmount(${c0 ? c0.arrears : 0})">سداد المتأخرات: ${money(c0 ? c0.arrears : 0)}</button>
       <button type="button" class="chip" onclick="setPayAmount(${c0 ? (c0.installment_amount ?? c0.rent_amount) : 0})">قيمة قسط واحد: ${money(c0 ? (c0.installment_amount ?? c0.rent_amount) : 0)}</button>
-    </div>
-    <label>المبلغ (ر.س) *<input name="amount" id="payAmount" type="number" step="0.01" min="0.01" required value="${presetAmount ?? ''}"></label>
-    <label>تاريخ الدفع<input name="payment_date" type="date" value="${todayStr()}"></label>
+    </div>`}
+    <label>المبلغ (ر.س) *<input name="amount" id="payAmount" type="number" step="0.01" min="0.01" required value="${editPayment ? editPayment.amount : (presetAmount ?? '')}"></label>
+    <label>تاريخ الدفع<input name="payment_date" type="date" value="${editPayment ? String(editPayment.payment_date).slice(0, 10) : todayStr()}"></label>
     <label>تقويم فترة السداد<select name="period_cal" id="periodCal"><option value="greg" selected>ميلادي</option><option value="hijri">هجري</option></select></label>
     <div id="periodGreg">
       <label>فترة السداد — من<input name="period_from" id="periodFrom" type="date"></label>
@@ -1022,10 +1065,10 @@ async function paymentForm(contractId, presetAmount) {
         <input name="pt_h_y" id="ptHy" type="number" min="1300" max="1600" placeholder="السنة">
       </span></label>
     </div>
-    <label>طريقة الدفع<select name="method">${PAY_METHODS.map((m) => `<option>${m}</option>`).join('')}</select></label>
-    <label>المقابل (الغرض)<select name="purpose">${PAY_PURPOSES.map((x) => `<option ${x === 'إيجار' ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+    <label>طريقة الدفع<select name="method">${PAY_METHODS.map((m) => `<option ${editPayment && editPayment.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+    <label>المقابل (الغرض)<select name="purpose">${PAY_PURPOSES.map((x) => `<option ${x === (editPayment ? (editPayment.purpose || 'إيجار') : 'إيجار') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
     <p class="muted" style="margin:0">تنبيه: دفعات الإيجار فقط تُحتسب في الأقساط والمتأخرات؛ وباقي الأغراض تحصيلات لا تُنقص متأخرات الإيجار، ودفعات «خدمات» لا تظهر في كشف حساب المالك.</p>
-    <label>ملاحظات<input name="notes"></label>`,
+    <label>ملاحظات<input name="notes" value="${esc(editPayment ? (editPayment.notes || '') : '')}"></label>`,
     async (data) => {
       // فترة السداد: في وضع الهجري تُحوَّل المدخلات إلى ميلادي ISO (صيغة التخزين القياسية)
       if (data.period_cal === 'hijri') {
@@ -1041,10 +1084,16 @@ async function paymentForm(contractId, presetAmount) {
       if (data.period_from && data.period_to && data.period_to < data.period_from) {
         throw new Error('تاريخ نهاية فترة السداد يجب أن يكون بعد تاريخ بدايتها أو مساوياً له');
       }
-      const payment = await api('/api/payments', { method: 'POST', body: JSON.stringify({ ...data, contract_id: Number(data.contract_id), amount: Number(data.amount) }) });
-      render();
-      setTimeout(() => showReceipt(payment.id, true), 80);
-    }, 'حفظ وإصدار السند');
+      if (editPayment) {
+        await api(`/api/payments/${editPayment.id}`, { method: 'PUT', body: JSON.stringify({ ...data, contract_id: Number(data.contract_id), amount: Number(data.amount) }) });
+        render();
+        setTimeout(() => showReceipt(editPayment.id), 80);
+      } else {
+        const payment = await api('/api/payments', { method: 'POST', body: JSON.stringify({ ...data, contract_id: Number(data.contract_id), amount: Number(data.amount) }) });
+        render();
+        setTimeout(() => showReceipt(payment.id, true), 80);
+      }
+    }, editPayment ? 'حفظ التعديل' : 'حفظ وإصدار السند');
   // تعبئة فترة السداد افتراضياً من فترة القسط، مع إبقائها قابلة للتعديل،
   // ومزامنة حقول الهجري/الميلادي عند تبديل التقويم
   const form = document.getElementById('modalForm');
@@ -1089,6 +1138,12 @@ async function paymentForm(contractId, presetAmount) {
     contractEl.addEventListener('change', () => { if (!periodTouched) applyDefaultPeriod(); });
     dateEl.addEventListener('change', () => { if (!periodTouched) applyDefaultPeriod(); });
     applyDefaultPeriod();
+    if (editPayment) {
+      // في وضع التعديل: فترة السند المحفوظة هي الأساس ولا تُستبدل بالافتراضية
+      periodTouched = true;
+      if (editPayment.period_from) fromEl.value = String(editPayment.period_from).slice(0, 10);
+      if (editPayment.period_to) toEl.value = String(editPayment.period_to).slice(0, 10);
+    }
   }
 }
 function setPayAmount(v) { const el = $('#payAmount'); if (el) el.value = v; }
@@ -1105,23 +1160,25 @@ async function showReceipt(paymentId, justCreated = false) {
       <h2>سند قبض</h2>
       <div class="r-no">رقم السند: ${String(r.receipt_no).padStart(4, '0')} · التاريخ: ${esc(p.payment_date)}</div>
       ${issuedAtLine(p.created_at, p.payment_date)}
+      ${p.edit_count ? `<div class="doc-stamp">نسخة معدّلة${p.edited_at ? ` — آخر تعديل: ${esc(String(p.edited_at).slice(0, 10))}` : ''}</div>` : ''}
+      ${p.deleted_at ? `<div class="doc-stamp deleted">سند محذوف — للاطلاع فقط</div>` : ''}
       <table>
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
         ${r.tenant && r.tenant.id_number ? `<tr><td>رقم الهوية</td><td>${esc(r.tenant.id_number)}</td></tr>` : ''}
-        ${r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
         ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
         <tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>
         <tr><td>العقد</td><td>من ${esc(r.contract ? r.contract.start_date : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(r.contract.end_date) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>
         ${p.period_from && p.period_to ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
+        ${r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
         <tr><td>المبلغ المستلم</td><td><strong>${money(p.amount)}</strong></td></tr>
         <tr><td>طريقة الدفع</td><td>${esc(p.method)}</td></tr>
         <tr><td>مقابل</td><td>${esc(p.purpose || 'إيجار')}</td></tr>
         ${r.issued_by ? `<tr><td>أصدره</td><td>${esc(r.issued_by)}</td></tr>` : ''}
         ${p.notes ? `<tr><td>ملاحظات</td><td>${esc(p.notes)}</td></tr>` : ''}
-        <tr><td>إجمالي المدفوع على العقد</td><td>${money(s.total_paid)}</td></tr>
-        <tr><td>المتبقي المستحق (متأخرات)</td><td>${money(s.arrears)}</td></tr>
-        ${s.remaining_on_contract !== null && s.remaining_on_contract !== undefined ? `<tr><td>المتبقي من كامل العقد</td><td>${money(s.remaining_on_contract)}</td></tr>` : ''}
+        <tr><td>إجمالي المدفوع على العقد</td><td class="paid-green">${money(s.total_paid)}</td></tr>
+        <tr><td>المتبقي المستحق (متأخرات)</td><td class="due-red">${money(s.arrears)}</td></tr>
+        ${s.remaining_on_contract !== null && s.remaining_on_contract !== undefined ? `<tr><td>المتبقي من كامل العقد</td><td class="due-red">${money(s.remaining_on_contract)}</td></tr>` : ''}
       </table>
       <div class="amount-words">المبلغ بالحروف: ${esc(tafqeet(p.amount))}</div>
       ${r.verify_code ? `<div class="receipt-verify">${qrSvg ? `<div class="qr-box">${qrSvg}</div>` : ''}
@@ -1194,7 +1251,7 @@ async function expenseForm(id) {
   await refreshCache();
   let e = {};
   if (id) { try { e = await api(`/api/expenses/${id}`); } catch (_) { e = {}; } }
-  const cats = ['صيانة', 'مرافق', 'عمولات', 'نظافة', 'حراسة', 'دفعة للمالك', 'أخرى'];
+  const cats = ['صيانة', 'كهرباء', 'مياه', 'مرافق', 'سباكة', 'لياسة', 'بويات ودهانات', 'نجارة', 'تكييف', 'مصعد', 'زجاج وألمنيوم', 'مواد بناء', 'أجور عمال', 'نظافة', 'حراسة', 'عمولات', 'نقل ومشال', 'دفعة للمالك', 'أخرى'];
   const methods = PAY_METHODS;
   formModal(id ? 'تعديل مصروف' : 'إضافة مصروف', `
     <label>العقار *<select name="property_id" id="expProperty">${CACHE.properties.map((p) => `<option value="${p.id}" ${e.property_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>

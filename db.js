@@ -9,7 +9,7 @@ const TABLES = {
   units: ['property_id', 'name', 'type', 'floor', 'default_rent', 'status', 'notes'],
   tenants: ['name', 'phone', 'id_number', 'email', 'notes', 'contract_no'],
   contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'installments_count', 'deposit', 'status', 'notes'],
-  payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by'],
+  payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by', 'edited_at', 'edit_count', 'deleted_at'],
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
 };
@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS payments (
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS period_from DATE;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS period_to DATE;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS purpose TEXT DEFAULT 'إيجار';
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS edit_count INTEGER DEFAULT 0;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE TABLE IF NOT EXISTS expenses (
   id SERIAL PRIMARY KEY, property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
   unit_id INTEGER REFERENCES units(id) ON DELETE SET NULL,
@@ -173,11 +176,33 @@ async function init() {
 }
 
 async function list(table) {
+  // الدفعات المحذوفة (حذفاً غير نهائي) لا تظهر في القوائم ولا تدخل أي حساب
+  if (usePg) {
+    const sql = table === 'payments'
+      ? `SELECT * FROM ${table} WHERE deleted_at IS NULL ORDER BY id`
+      : `SELECT * FROM ${table} ORDER BY id`;
+    const { rows } = await pool.query(sql);
+    return rows;
+  }
+  const rows = [...loadMem()[table]].sort((a, b) => a.id - b.id);
+  return table === 'payments' ? rows.filter((r) => !r.deleted_at) : rows;
+}
+
+async function listRaw(table) {
+  // كل الصفوف دون ترشيح — للنسخ الاحتياطي حتى تبقى السندات المحذوفة قابلة للاسترجاع بعد الاستعادة
   if (usePg) {
     const { rows } = await pool.query(`SELECT * FROM ${table} ORDER BY id`);
     return rows;
   }
   return [...loadMem()[table]].sort((a, b) => a.id - b.id);
+}
+
+async function listTrash(table) {
+  if (usePg) {
+    const { rows } = await pool.query(`SELECT * FROM ${table} WHERE deleted_at IS NOT NULL ORDER BY id`);
+    return rows;
+  }
+  return [...loadMem()[table]].filter((r) => r.deleted_at).sort((a, b) => a.id - b.id);
 }
 
 async function get(table, id) {
@@ -404,7 +429,7 @@ async function removeAttachment(id) {
 
 async function exportAll() {
   const out = {};
-  for (const t of Object.keys(TABLES)) out[t] = await list(t);
+  for (const t of Object.keys(TABLES)) out[t] = await listRaw(t);
   out.settings = await getSettings();
   out.attachments = await listAttachmentsFull();
   return out;
@@ -702,7 +727,7 @@ async function pruneBackups() {
 }
 
 module.exports = {
-  init, list, get, insert, insertPayment, update, remove, exportAll, importAll,
+  init, list, listRaw, listTrash, get, insert, insertPayment, update, remove, exportAll, importAll,
   getSettings, setSettings,
   listAttachments, listAttachmentsMeta, listAttachmentsFull, getAttachment, insertAttachment, removeAttachment,
   insertAudit, listAudit,

@@ -380,7 +380,14 @@ for (const table of Object.keys(db.TABLES)) {
         const periodError = checkPeriod(pf, pt);
         if (periodError) return res.status(400).json({ error: periodError });
       }
-      const row = await db.update(table, req.params.id, req.body || {});
+      let bodyToSave = req.body || {};
+      if (table === 'payments') {
+        // أي تعديل على سند قبض يُختم عليه: وقت التعديل وعدّاد تعديلات (يُطبع «نسخة معدّلة»)
+        const existingPay = await db.get('payments', req.params.id);
+        if (!existingPay) return res.status(404).json({ error: 'غير موجود' });
+        bodyToSave = { ...bodyToSave, edited_at: new Date().toISOString(), edit_count: (Number(existingPay.edit_count) || 0) + 1 };
+      }
+      const row = await db.update(table, req.params.id, bodyToSave);
       if (!row) return res.status(404).json({ error: 'غير موجود' });
       await audit(req, table, row.id, 'update', row);
       await takeSnapshot('auto');
@@ -390,7 +397,12 @@ for (const table of Object.keys(db.TABLES)) {
   app.delete(`/api/${table}/:id`, auth, adminOnlyDelete, async (req, res) => {
     try {
       const before = await db.get(table, req.params.id);
-      await db.remove(table, req.params.id);
+      if (table === 'payments') {
+        // حذف سند القبض غير نهائي: يُعلَّم محذوفاً فيختفي من القوائم والحسابات ويبقى قابلاً للاسترجاع
+        await db.update('payments', req.params.id, { deleted_at: new Date().toISOString() });
+      } else {
+        await db.remove(table, req.params.id);
+      }
       if (before) await audit(req, table, before.id, 'delete', before);
       await takeSnapshot('auto');
       res.json({ ok: true });
@@ -510,6 +522,20 @@ app.get('/api/payments/:id/receipt', auth, async (req, res) => {
       qr_text: receiptQrText({ payment: normPayment, receipt_no: payment.receipt_no, tenant, settings, verify_code }),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---------- سلة السندات المحذوفة (حذف غير نهائي) ----------
+app.get('/api/payments-trash', auth, async (req, res) => {
+  try { res.json(await db.listTrash('payments')); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/payments/:id/restore', auth, adminOnlyDelete, async (req, res) => {
+  try {
+    const row = await db.update('payments', req.params.id, { deleted_at: null });
+    if (!row) return res.status(404).json({ error: 'غير موجود' });
+    await audit(req, 'payments', row.id, 'update', row);
+    await takeSnapshot('auto');
+    res.json(row);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // بيانات سند صرف كاملة للطباعة

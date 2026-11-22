@@ -110,6 +110,10 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 .receipt-doc table { font-size: 15px; }
 .receipt-doc td { border-bottom: 1px dotted #bbb; padding: 7px 4px; }
 .receipt-doc .amount-words { background: #f4f6f7; padding: 10px; border-radius: 8px; margin: 10px 0; font-weight: 700; }
+.paid-green { color: var(--ok); font-weight: 700; }
+.due-red { color: var(--danger); font-weight: 700; }
+.doc-stamp { text-align: center; border: 1.5px solid var(--teal); color: var(--teal); border-radius: 8px; padding: 4px 10px; margin: 6px auto 10px; font-weight: 700; width: fit-content; }
+.doc-stamp.deleted { border-color: var(--danger); color: var(--danger); }
 .receipt-verify { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
 .receipt-verify .qr-box { flex: 0 0 auto; }
 .receipt-verify .qr-box svg { width: 104px; height: 104px; display: block; }
