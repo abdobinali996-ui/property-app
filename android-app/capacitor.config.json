@@ -1,0 +1,9 @@
+{
+  "appId": "com.sulaiman.propertyapp.demo",
+  "appName": "إدارة الأملاك — تجريبي",
+  "webDir": "www",
+  "server": {
+    "url": "https://property-app-demo.onrender.com",
+    "cleartext": false
+  }
+}
