@@ -1088,6 +1088,8 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     <label>المستأجر<select id="payTenant"></select></label>
     <label>العقد (الوحدة) *<select name="contract_id" id="payContract"></select></label>
     <p class="muted" id="payUnitInfo" style="margin:-4px 0 10px"></p>
+    <label>رقم القسط<select name="installment_no" id="payInstallment"><option value="">تلقائي — حسب ترتيب السندات</option></select></label>
+    <p class="muted" style="margin:-4px 0 10px">اختر رقم القسط إن كانت الدفعة عن قسط بعينه — مهم عند أول سند للمستأجر إن لم يكن عن القسط الأول؛ وستُضبط فترة السداد تلقائياً على فترة ذلك القسط.</p>
     ${editPayment ? '' : `<div class="chips">
       <button type="button" class="chip" id="chipArrears" onclick="setPayAmount(${c0 ? c0.arrears : 0})">سداد المتأخرات: ${money(c0 ? c0.arrears : 0)}</button>
       <button type="button" class="chip" id="chipInstallment" onclick="setPayAmount(${c0 ? (c0.installment_amount ?? c0.rent_amount) : 0})">قيمة قسط واحد: ${money(c0 ? (c0.installment_amount ?? c0.rent_amount) : 0)}</button>
@@ -1117,6 +1119,7 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     <label>ملاحظات<input name="notes" value="${esc(editPayment ? (editPayment.notes || '') : '')}"></label>`,
     async (data) => {
       if (!data.contract_id) throw new Error('اختر المستأجر والعقد أولاً — عدّل البحث إن لم يظهر');
+      data.installment_no = data.installment_no ? Number(data.installment_no) : null;
       // فترة السداد: في وضع الهجري تُحوَّل المدخلات إلى ميلادي ISO (صيغة التخزين القياسية)
       if (data.period_cal === 'hijri') {
         const f = hijriToIso(data.pf_h_y, data.pf_h_m, data.pf_h_d);
@@ -1239,6 +1242,43 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     fillTenants();
     if (c0) { tenantEl.value = String(c0.tenant_id); fillContracts(); contractEl.value = String(c0.id); onContractChanged(); }
     applyDefaultPeriod();
+    // رقم القسط الصريح: قائمة تُبنى من العقد المختار حالياً، وفترته تُملأ تلقائياً
+    const instEl = document.getElementById('payInstallment');
+    const purposeEl = form.elements.purpose;
+    const installmentPeriodClient = (contract, k) => {
+      if (!contract || !contract.start_date || !k) return null;
+      const step = CYCLE_MONTHS_F[contract.cycle] || 1;
+      const from = addMonthsStr(contract.start_date, (k - 1) * step);
+      let to = addDaysStr(addMonthsStr(from, step), -1);
+      if (contract.end_date && to > contract.end_date) to = contract.end_date;
+      return { period_from: from, period_to: to };
+    };
+    const fillInstallments = () => {
+      const c = pool.find((x) => x.id === Number(contractEl.value));
+      const cur = instEl.value;
+      const n = c ? (Number(c.installments_total) || 0) : 0;
+      const amounts = c && Array.isArray(c.installment_amounts) ? c.installment_amounts : [];
+      instEl.innerHTML = `<option value="">تلقائي — حسب ترتيب السندات</option>` + Array.from({ length: n }, (_, i) => `<option value="${i + 1}">القسط رقم ${i + 1}${amounts[i] != null ? ` — ${money(amounts[i])}` : ''}</option>`).join('');
+      if ([...instEl.options].some((o) => o.value === cur)) instEl.value = cur;
+    };
+    const syncPurpose = () => {
+      const isRent = !purposeEl || purposeEl.value === 'إيجار';
+      instEl.disabled = !isRent;
+      if (!isRent) instEl.value = '';
+    };
+    contractEl.addEventListener('change', fillInstallments);
+    instEl.addEventListener('change', () => {
+      if (periodTouched) return;
+      const c = pool.find((x) => x.id === Number(contractEl.value));
+      if (instEl.value) {
+        const per = installmentPeriodClient(c, Number(instEl.value));
+        if (per) { fromEl.value = per.period_from; toEl.value = per.period_to; if (calEl.value === 'hijri') gregToHijriFill(); }
+      } else applyDefaultPeriod();
+    });
+    if (purposeEl) purposeEl.addEventListener('change', syncPurpose);
+    fillInstallments();
+    if (editPayment && editPayment.installment_no) instEl.value = String(editPayment.installment_no);
+    syncPurpose();
     if (editPayment) {
       // في وضع التعديل: فترة السند المحفوظة هي الأساس ولا تُستبدل بالافتراضية
       periodTouched = true;
@@ -1254,6 +1294,8 @@ async function showReceipt(paymentId, justCreated = false) {
   const r = await api(`/api/payments/${paymentId}/receipt`);
   const p = r.payment;
   const s = r.summary || {};
+  // سند غير الإيجار (خدمات/مياه/كهرباء/أخرى): بلا صف عقد ولا موقف إيجار — الوحدة فقط
+  const isRent = (p.purpose || 'إيجار') === 'إيجار';
   const qrSvg = r.qr_text ? makeQrSvg(r.qr_text) : '';
   const html = `
     <div class="receipt-doc">
@@ -1267,9 +1309,9 @@ async function showReceipt(paymentId, justCreated = false) {
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
         ${r.tenant && r.tenant.id_number ? `<tr><td>رقم الهوية</td><td>${esc(r.tenant.id_number)}</td></tr>` : ''}
-        <tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>
+        ${isRent ? `<tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>` : `<tr><td>الوحدة</td><td>${esc(r.unit ? r.unit.name : '')}</td></tr>`}
         ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
-        <tr><td>العقد</td><td>من ${esc(r.contract ? r.contract.start_date : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(r.contract.end_date) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>
+        ${isRent ? `<tr><td>العقد</td><td>من ${esc(r.contract ? r.contract.start_date : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(r.contract.end_date) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>` : ''}
         ${p.period_from && p.period_to ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
         ${r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
         <tr><td>المبلغ المستلم</td><td><strong>${money(p.amount)}</strong></td></tr>
@@ -1277,10 +1319,10 @@ async function showReceipt(paymentId, justCreated = false) {
         <tr><td>مقابل</td><td>${esc(p.purpose || 'إيجار')}</td></tr>
         ${r.issued_by ? `<tr><td>أصدره</td><td>${esc(r.issued_by)}</td></tr>` : ''}
         ${p.notes ? `<tr><td>ملاحظات</td><td>${esc(p.notes)}</td></tr>` : ''}
-        <tr><td>إجمالي المدفوع على العقد</td><td class="paid-green">${money(s.total_paid)}</td></tr>
+        ${isRent ? `<tr><td>إجمالي المدفوع على العقد</td><td class="paid-green">${money(s.total_paid)}</td></tr>` : ''}
         ${r.installment_balance ? `<tr><td>باقي القسط رقم ${r.installment_balance.index} من ${r.installment_balance.total}</td><td class="due-red"><strong>${money(r.installment_balance.remaining)}</strong> (${r.installment_balance.status}${r.installment_balance.status === 'باقي' ? ` — يُستحق في ${esc(r.installment_balance.due_date)}` : ''})</td></tr>` : (r.installment ? `<tr><td>الأقساط</td><td class="paid-green"><strong>مسددة بالكامل ✓</strong></td></tr>` : '')}
-        <tr><td>المتبقي المستحق (متأخرات)</td><td class="due-red">${money(s.arrears)}</td></tr>
-        ${s.remaining_on_contract !== null && s.remaining_on_contract !== undefined ? `<tr><td>المتبقي من كامل العقد</td><td class="due-red">${money(s.remaining_on_contract)}</td></tr>` : ''}
+        ${isRent ? `<tr><td>المتبقي المستحق (متأخرات)</td><td class="due-red">${money(s.arrears)}</td></tr>` : ''}
+        ${isRent && s.remaining_on_contract !== null && s.remaining_on_contract !== undefined ? `<tr><td>المتبقي من كامل العقد</td><td class="due-red">${money(s.remaining_on_contract)}</td></tr>` : ''}
       </table>
       <div class="amount-words">المبلغ بالحروف: ${esc(tafqeet(p.amount))}</div>
       ${r.verify_code ? `<div class="receipt-verify">${qrSvg ? `<div class="qr-box">${qrSvg}</div>` : ''}

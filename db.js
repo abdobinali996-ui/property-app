@@ -9,7 +9,7 @@ const TABLES = {
   units: ['property_id', 'name', 'type', 'floor', 'default_rent', 'status', 'notes'],
   tenants: ['name', 'phone', 'id_number', 'email', 'notes', 'contract_no'],
   contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'installments_count', 'deposit', 'status', 'notes'],
-  payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by', 'edited_at', 'edit_count', 'deleted_at'],
+  payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by', 'edited_at', 'edit_count', 'deleted_at', 'installment_no'],
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
 };
@@ -64,6 +64,7 @@ ALTER TABLE payments ADD COLUMN IF NOT EXISTS purpose TEXT DEFAULT 'إيجار';
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS edit_count INTEGER DEFAULT 0;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS installment_no INTEGER;
 CREATE TABLE IF NOT EXISTS expenses (
   id SERIAL PRIMARY KEY, property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
   unit_id INTEGER REFERENCES units(id) ON DELETE SET NULL,
@@ -218,8 +219,8 @@ function pick(table, obj) {
   for (const col of TABLES[table]) {
     if (obj[col] === undefined) continue;
     let v = obj[col];
-    if (v === '' && (col === 'end_date' || col === 'unit_id' || col === 'installments_count' || col === 'period_from' || col === 'period_to')) v = null;
-    if (col === 'installments_count' && v !== null) {
+    if (v === '' && (col === 'end_date' || col === 'unit_id' || col === 'installments_count' || col === 'period_from' || col === 'period_to' || col === 'installment_no')) v = null;
+    if ((col === 'installments_count' || col === 'installment_no') && v !== null) {
       v = Number(v);
       if (!Number.isFinite(v) || v <= 0) v = null;
       else v = Math.floor(v);

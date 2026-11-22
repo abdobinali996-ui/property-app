@@ -386,6 +386,16 @@ for (const table of Object.keys(db.TABLES)) {
         const existingPay = await db.get('payments', req.params.id);
         if (!existingPay) return res.status(404).json({ error: 'غير موجود' });
         bodyToSave = { ...bodyToSave, edited_at: new Date().toISOString(), edit_count: (Number(existingPay.edit_count) || 0) + 1 };
+        // تطبيع رقم القسط: لدفعات الإيجار فقط وضمن عدد أقساط العقد، وإلا يُصفَّر (تلقائي)
+        if (bodyToSave.installment_no !== undefined || bodyToSave.purpose !== undefined || bodyToSave.contract_id !== undefined) {
+          const cid = bodyToSave.contract_id !== undefined ? Number(bodyToSave.contract_id) : existingPay.contract_id;
+          const cForInst = await db.get('contracts', cid);
+          const purposeNow = bodyToSave.purpose !== undefined ? bodyToSave.purpose : existingPay.purpose;
+          let k = bodyToSave.installment_no !== undefined ? Number(bodyToSave.installment_no) : Number(existingPay.installment_no);
+          if (purposeNow !== 'إيجار' || !cForInst || !Number.isFinite(k) || k < 1 || k > calc.installmentsCount(cForInst)) k = null;
+          else k = Math.floor(k);
+          bodyToSave = { ...bodyToSave, installment_no: k };
+        }
       }
       const row = await db.update(table, req.params.id, bodyToSave);
       if (!row) return res.status(404).json({ error: 'غير موجود' });
@@ -435,13 +445,20 @@ app.post('/api/payments', auth, async (req, res) => {
       return res.status(400).json({ error: 'اختر العقد وأدخل مبلغاً صحيحاً' });
     }
     const paymentDate = body.payment_date || calc.fmtDate(new Date());
+    const purpose = calc.PAYMENT_PURPOSES.includes(body.purpose) ? body.purpose : 'إيجار';
+    const contract = await db.get('contracts', Number(body.contract_id));
+    // رقم القسط الصريح: لدفعات الإيجار فقط وضمن عدد أقساط العقد، وإلا null (تلقائي)
+    let installmentNo = null;
+    if (purpose === 'إيجار' && contract) {
+      const k = Number(body.installment_no);
+      if (Number.isFinite(k) && k >= 1 && k <= calc.installmentsCount(contract)) installmentNo = Math.floor(k);
+    }
     // فترة السداد: ما أرسله المستخدم، وما نقص منها يُستكمل من فترة القسط
-    // الذي تقع فيه الدفعة (المحسوبة في calc.paymentPeriod)
+    // المحدد إن وُجد، وإلا من فترة القسط الذي تقع فيه الدفعة (calc.paymentPeriod)
     let periodFrom = body.period_from ? String(body.period_from).slice(0, 10) : null;
     let periodTo = body.period_to ? String(body.period_to).slice(0, 10) : null;
     if (!periodFrom || !periodTo) {
-      const contract = await db.get('contracts', Number(body.contract_id));
-      const def = contract ? calc.paymentPeriod(contract, { payment_date: paymentDate }) : null;
+      const def = contract ? (installmentNo ? calc.installmentPeriod(contract, installmentNo) : calc.paymentPeriod(contract, { payment_date: paymentDate })) : null;
       if (def) {
         periodFrom = periodFrom || def.period_from;
         periodTo = periodTo || def.period_to;
@@ -454,10 +471,11 @@ app.post('/api/payments', auth, async (req, res) => {
       amount: Number(body.amount),
       payment_date: paymentDate,
       method: body.method || 'تحويل',
-      purpose: calc.PAYMENT_PURPOSES.includes(body.purpose) ? body.purpose : 'إيجار',
+      purpose,
       notes: body.notes || '',
       period_from: periodFrom,
       period_to: periodTo,
+      installment_no: installmentNo,
       created_by: actorOf(req),
     });
     await audit(req, 'payments', payment.id, 'create', payment);
@@ -501,9 +519,10 @@ app.get('/api/payments/:id/receipt', auth, async (req, res) => {
     // دفعة غير إيجارية لا قسط لها — تُخفى فقرة القسط من السند كلياً
     let installment = contract ? calc.installmentInfo(contract, allPays, payment.id) : null;
     if (installment && installment.installment_index == null) installment = null;
-    // باقي القسط الحالي وتصنيفه (باقي/متأخر) — لدفعات الإيجار فقط، ويصح
-    // أيضاً مع السداد المقدم قبل الاستحقاق
-    const installment_balance = (contract && installment) ? calc.installmentBalance(contract, allPays) : null;
+    // باقي القسط وتصنيفه (باقي/متأخر) — لدفعات الإيجار فقط، ويصح أيضاً مع
+    // السداد المقدم قبل الاستحقاق؛ وإن كانت الدفعة محددةً لقسط بعينه وبقي
+    // منه شيء فباقي ذلك القسط هو المعروض
+    const installment_balance = (contract && installment) ? calc.installmentBalanceForPayment(contract, allPays, payment) : null;
     const settings = await db.getSettings();
     const verify_code = receiptVerifyCode(payment);
     const normPayment = {

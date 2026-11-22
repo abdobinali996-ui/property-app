@@ -154,14 +154,23 @@ function contractSummary(contract, payments, asOf) {
   };
 }
 
-// معلومات القسط لدفعة معيّنة: ترتيبها بين دفعات إيجار العقد فقط (حسب رقم
-// السند)، وإجمالي عدد أقساط العقد، وقيمة القسط المقابل لهذا الترتيب.
+// معلومات القسط لدفعة معيّنة: إن حدّد المستخدم رقم القسط صراحةً
+// (installment_no) فهو المعتمد، وإلا فترتيبها بين دفعات إيجار العقد فقط
+// (حسب رقم السند)، وإجمالي عدد أقساط العقد، وقيمة القسط المقابل.
 // دفعة غير إيجارية لا قسط لها: تعيد فهارس خالية (null).
 function installmentInfo(contract, payments, paymentId) {
   const amounts = contract ? installmentAmounts(contract) : [];
   const target = (payments || []).find((p) => Number(p.id) === Number(paymentId));
   if (target && !isRentPayment(target)) {
     return { installment_index: null, installment_total: amounts.length || null, installment_amount: null };
+  }
+  const assigned = target ? Number(target.installment_no) : NaN;
+  if (Number.isFinite(assigned) && assigned >= 1 && assigned <= amounts.length) {
+    return {
+      installment_index: assigned,
+      installment_total: amounts.length || null,
+      installment_amount: amounts[assigned - 1],
+    };
   }
   const sorted = rentPayments(payments).sort((a, b) =>
     ((a.receipt_no || 0) - (b.receipt_no || 0)) || ((a.id || 0) - (b.id || 0)));
@@ -214,22 +223,62 @@ function installmentSchedule(contract) {
   }));
 }
 
-// القسط التالي غير المسدد: الدفعات تغطي الأقساط بالترتيب (ما زاد عن قسط
-// ينتقل لما بعده). يعيد null إن كان العقد مسدداً بالكامل.
-// remaining = الجزء غير المغطى من ذلك القسط حتى الآن
-function nextUnpaidInstallment(contract, payments) {
+// تغطية الأقساط دفعةً دفعة: كل دفعة إيجار تغطي قسطها المحدد صراحةً
+// (installment_no) أولاً وما زاد ينساب للأقساط التالية بالترتيب، والدفعة
+// بلا تحديد تغطي أقدم قسط غير مكتمل ثم ما بعده (السلوك الأصلي بالضبط).
+// يعيد جدول الأقساط مضافاً إليه covered وremaining لكل قسط.
+function installmentCoverage(contract, payments) {
   const schedule = installmentSchedule(contract);
-  if (!schedule.length) return null;
-  const totalPaid = round2(sumAmounts(rentPayments(payments)));
-  let covered = 0;
-  for (const inst of schedule) {
-    covered = round2(covered + inst.amount);
-    if (totalPaid < covered) {
-      const remaining = round2(covered - totalPaid);
-      return { ...inst, remaining, paid_towards: round2(inst.amount - remaining) };
+  const covered = schedule.map(() => 0);
+  const sorted = rentPayments(payments).slice().sort((a, b) =>
+    ((a.receipt_no || 0) - (b.receipt_no || 0)) || ((a.id || 0) - (b.id || 0)));
+  for (const p of sorted) {
+    let left = Number(p.amount) || 0;
+    if (!(left > 0)) continue;
+    const assigned = Number(p.installment_no);
+    let start;
+    if (Number.isFinite(assigned) && assigned >= 1 && assigned <= schedule.length) {
+      start = assigned - 1;
+    } else {
+      start = covered.findIndex((c, i) => c < schedule[i].amount - 1e-9);
+      if (start < 0) start = schedule.length;
+    }
+    for (let i = start; i < schedule.length && left > 1e-9; i++) {
+      const room = round2(schedule[i].amount - covered[i]);
+      if (room <= 0) continue;
+      const take = Math.min(room, left);
+      covered[i] = round2(covered[i] + take);
+      left = round2(left - take);
     }
   }
+  return schedule.map((s, i) => ({ ...s, covered: covered[i], remaining: round2(s.amount - covered[i]) }));
+}
+
+// القسط التالي غير المسدد: أول قسط غير مغطّى بالكامل حسب تغطية الدفعات.
+// يعيد null إن كان العقد مسدداً بالكامل.
+// remaining = الجزء غير المغطى من ذلك القسط حتى الآن
+function nextUnpaidInstallment(contract, payments) {
+  const cov = installmentCoverage(contract, payments);
+  for (const e of cov) {
+    if (e.remaining > 0) return { ...e, paid_towards: e.covered };
+  }
   return null;
+}
+
+// فترة قسط بعينه (لبدء فترة السداد الافتراضية عند تحديد رقم القسط):
+// من تاريخ استحقاقه إلى بداية القسط التالي − يوم، وبحد أقصى نهاية العقد
+function installmentPeriod(contract, k) {
+  const schedule = installmentSchedule(contract);
+  const e = schedule[k - 1];
+  if (!e) return null;
+  const step = CYCLE_MONTHS[contract.cycle] || 1;
+  const from = toDate(e.due_date);
+  let to = addDays(addMonths(from, step), -1);
+  if (contract.end_date) {
+    const en = toDate(contract.end_date);
+    if (to > en) to = en;
+  }
+  return { period_from: fmtDate(from), period_to: fmtDate(to) };
 }
 
 // موقف القسط الحالي (أول قسط غير مغطّى بالكامل): باقيه وتصنيفه حسب تاريخ
@@ -248,6 +297,29 @@ function installmentBalance(contract, payments) {
     due_date: next.due_date,
     status: next.due_date <= fmtDate(today()) ? 'متأخر' : 'باقي',
   };
+}
+
+// باقي القسط كما يظهر على سند قبض بعينه: إن كانت الدفعة محددةً لقسط
+// وبقي من ذلك القسط شيء بعد كل الدفعات، فهو المعروض؛ وإلا فباقي أول قسط
+// غير مغطّى (installmentBalance). يعيد null عند سداد العقد بالكامل.
+function installmentBalanceForPayment(contract, payments, payment) {
+  const assigned = payment ? Number(payment.installment_no) : NaN;
+  if (Number.isFinite(assigned) && assigned >= 1) {
+    const cov = installmentCoverage(contract, payments);
+    const e = cov[assigned - 1];
+    if (e && e.remaining > 0) {
+      return {
+        index: e.index,
+        total: cov.length,
+        amount: e.amount,
+        remaining: e.remaining,
+        paid_towards: e.covered,
+        due_date: e.due_date,
+        status: e.due_date <= fmtDate(today()) ? 'متأخر' : 'باقي',
+      };
+    }
+  }
+  return installmentBalance(contract, payments);
 }
 
 // المستحق خلال شهر معيّن (أقساط تبدأ فترتها داخل ذلك الشهر، بمبالغها الفردية)
@@ -269,6 +341,7 @@ module.exports = {
   periodStarts, installmentsCount, installmentAmounts,
   contractSummary, dueInMonth, installmentInfo, paymentPeriod,
   installmentSchedule, nextUnpaidInstallment, installmentBalance,
+  installmentCoverage, installmentBalanceForPayment, installmentPeriod,
   paymentPurpose, isRentPayment, isOfficePayment, rentPayments, OFFICE_PURPOSE,
   normalizeOwnerName,
 };
