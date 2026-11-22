@@ -1747,14 +1747,18 @@ app.get('/api/dashboard', auth, async (req, res) => {
         .filter((p) => calc.isRentPayment(p) && calc.fmtDate(p.payment_date).startsWith(ym))
         .reduce((s, p) => s + Number(p.amount || 0), 0);
       const dueRemaining = Math.max(0, calc.round2(dueMonth - paidMonth));
-      if (dueRemaining <= 0 && !(c.arrears > 0)) continue;
+      // الإجمالي المستحق عليه فعلياً الآن: أقساط بدأت حتى اليوم − المدفوع،
+      // ويشمل باقي قسط بدأ ولم يحن تأخيره بعد (لا يظهر في حساب الشهر وحده)
+      const owedNow = calc.round2(Math.max(0, (Number(c.total_due) || 0) - (Number(c.total_paid) || 0)));
+      if (dueRemaining <= 0 && !(c.arrears > 0) && owedNow <= 0) continue;
       duesList.push({
         contract_id: c.id, tenant_id: c.tenant_id, tenant_name: c.tenant_name,
         unit_name: c.unit_name, property_name: c.property_name,
         due_this_month: dueMonth, due_remaining: dueRemaining, arrears: c.arrears || 0,
+        owed_now: owedNow,
       });
     }
-    duesList.sort((a, b) => (b.arrears - a.arrears) || (b.due_remaining - a.due_remaining));
+    duesList.sort((a, b) => (b.arrears - a.arrears) || (b.owed_now - a.owed_now) || (b.due_remaining - a.due_remaining));
     // تفصيل محصّل هذا الشهر حسب أقسام طريقة الدفع (نقدي/بنك/شيك/منصة بفرعيها/أخرى)
     const perMethodDash = new Map();
     for (const p of payments) {

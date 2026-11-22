@@ -469,18 +469,16 @@ async function viewDashboard() {
 async function showDuesDetails() {
   const d = await api('/api/dashboard');
   const rows = d.dues_list || [];
-  const totDue = rows.reduce((s, r) => s + (Number(r.due_remaining) || 0), 0);
-  const totArr = rows.reduce((s, r) => s + (Number(r.arrears) || 0), 0);
+  const totOwed = rows.reduce((s, r) => s + (Number(r.owed_now) || 0), 0);
   openModal('المستحقات والمتأخرات — عند مين؟', rows.length ? `
     <div class="table-wrap"><table>
-      <tr><th>المستأجر</th><th>الوحدة</th><th>العقار</th><th>مستحق هذا الشهر (المتبقي)</th><th>متأخرات</th><th></th></tr>
+      <tr><th>المستأجر</th><th>الوحدة</th><th>العقار</th><th>الإجمالي المستحق عليه</th><th></th></tr>
       ${rows.map((r) => `<tr><td>${esc(r.tenant_name)}</td><td>${esc(r.unit_name)}</td><td>${esc(r.property_name)}</td>
-        <td class="money">${money(r.due_remaining)}</td>
-        <td class="${r.arrears > 0 ? 'arrears' : ''}">${money(r.arrears)}</td>
-        <td><button class="btn small primary" onclick="closeModal(); paymentForm(${r.contract_id}, ${r.arrears > 0 ? r.arrears : r.due_remaining})">تسجيل دفعة</button>${r.arrears > 0 ? ' ' + reminderBtn(r.tenant_id, r.arrears) : ''}</td></tr>`).join('')}
-      <tr><td colspan="3"><strong>الإجمالي</strong></td><td class="money"><strong>${money(totDue)}</strong></td><td class="arrears"><strong>${money(totArr)}</strong></td><td></td></tr>
+        <td class="arrears"><strong>${money(r.owed_now)}</strong></td>
+        <td><button class="btn small primary" onclick="closeModal(); paymentForm(${r.contract_id}, ${r.owed_now > 0 ? r.owed_now : r.due_remaining})">تسجيل دفعة</button>${r.arrears > 0 ? ' ' + reminderBtn(r.tenant_id, r.arrears) : ''}</td></tr>`).join('')}
+      <tr><td colspan="3"><strong>الإجمالي</strong></td><td class="arrears"><strong>${money(totOwed)}</strong></td><td></td></tr>
     </table></div>
-    <p class="muted">«مستحق هذا الشهر» = أقساط بدأت هذا الشهر ولم تُدفع بعد. «متأخرات» = مبالغ حلّ موعدها من فترات سابقة ولم تُدفع.</p>`
+    <p class="muted">«الإجمالي المستحق عليه» = كل الأقساط التي بدأ موعدها حتى اليوم ولم تُدفع بعد، لكل مستأجر على حدة.</p>`
     : '<p class="muted">لا توجد مستحقات أو متأخرات حالياً — ممتاز 🎉</p>');
 }
 
