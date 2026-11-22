@@ -234,10 +234,22 @@ function formModal(title, fieldsHtml, onSubmit, submitLabel = 'حفظ') {
   let initialData = null;
   setTimeout(() => { try { initialData = JSON.stringify(Object.fromEntries(new FormData(formEl).entries())); } catch (_) {} }, 0);
   modalDirtyCheck = () => initialData !== null && JSON.stringify(Object.fromEntries(new FormData(formEl).entries())) !== initialData;
+  // قفل الحفظ أثناء التنفيذ: ضغطة ثانية على «حفظ» (أو إدخال مزدوج) لا تُنشئ نسخة مكررة
+  let submitting = false;
   formEl.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (submitting) return;
+    submitting = true;
+    const btn = formEl.querySelector('button[type="submit"]');
+    const btnLabel = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الحفظ…'; }
     const data = Object.fromEntries(new FormData(e.target).entries());
-    try { await onSubmit(data); modalDirtyCheck = null; closeModal(); } catch (err) { $('#formError').textContent = err.message; }
+    try { await onSubmit(data); modalDirtyCheck = null; closeModal(); }
+    catch (err) {
+      $('#formError').textContent = err.message;
+      submitting = false;
+      if (btn) { btn.disabled = false; btn.textContent = btnLabel; }
+    }
   });
 }
 
@@ -246,7 +258,13 @@ function confirmDelete(label, onYes) {
     <div class="form-actions"><button class="btn danger" id="delYes">حذف نهائي</button>
     <button class="btn" id="delNo">إلغاء</button></div>`);
   $('#delNo').addEventListener('click', closeModal);
-  $('#delYes').addEventListener('click', async () => { await onYes(); closeModal(); });
+  let deleting = false;
+  $('#delYes').addEventListener('click', async () => {
+    if (deleting) return;
+    deleting = true;
+    $('#delYes').disabled = true;
+    try { await onYes(); closeModal(); } catch (_) { deleting = false; $('#delYes').disabled = false; }
+  });
 }
 
 // ---------------- الدخول والخروج ----------------
@@ -1453,8 +1471,11 @@ async function meterModal(unitId) {
       <td class="muted">${r.prev_date ? 'من ' + esc(r.prev_date) : 'أول قراءة'}</td>
       <td>${IS_ADMIN() ? `<button class="btn small danger" onclick="deleteMeter(${r.id}, ${unitId})">حذف</button>` : ''}</td></tr>`).join('')}</table></div>`
     : '<p class="muted">لا توجد قراءات بعد.</p>'}`);
+  let meterSaving = false;
   $('#meterForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (meterSaving) return;
+    meterSaving = true;
     const data = Object.fromEntries(new FormData(e.target).entries());
     try {
       await api('/api/meter_readings', {
