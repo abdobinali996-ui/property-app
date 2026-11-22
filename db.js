@@ -8,7 +8,7 @@ const TABLES = {
   properties: ['name', 'address', 'owner_name', 'notes'],
   units: ['property_id', 'name', 'type', 'floor', 'default_rent', 'status', 'notes'],
   tenants: ['name', 'phone', 'id_number', 'email', 'notes', 'contract_no'],
-  contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'installments_count', 'deposit', 'status', 'notes'],
+  contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'installments_count', 'deposit', 'status', 'notes', 'calendar'],
   payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by', 'edited_at', 'edit_count', 'deleted_at', 'installment_no'],
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS contracts (
   cycle TEXT NOT NULL DEFAULT 'monthly', deposit NUMERIC(12,2) DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active', notes TEXT DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 ALTER TABLE contracts ADD COLUMN IF NOT EXISTS installments_count INTEGER;
+ALTER TABLE contracts ADD COLUMN IF NOT EXISTS calendar TEXT DEFAULT 'gregorian';
 CREATE SEQUENCE IF NOT EXISTS receipt_seq START 1;
 CREATE TABLE IF NOT EXISTS payments (
   id SERIAL PRIMARY KEY, contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,

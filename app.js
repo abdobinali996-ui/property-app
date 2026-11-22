@@ -156,6 +156,11 @@ function fmtGregFull(iso) {
   if (!dt) return '';
   return new Intl.DateTimeFormat('ar-u-ca-gregory', { day: 'numeric', month: 'long', year: 'numeric' }).format(dt);
 }
+// عرض تاريخ عقد حسب تقويمه: هجري كامل إن كان العقد هجرياً، وإلا ISO الميلادي كما هو
+function contractDateDisp(c, iso) {
+  if (!iso) return '';
+  return c && c.calendar === 'hijri' ? fmtHijriFull(iso) : iso;
+}
 // ==== نهاية تحويل هجري/ميلادي ====
 
 // ==== وقت الإصدار (من الطابع الزمني created_at) بتوقيت الرياض ====
@@ -804,7 +809,7 @@ async function viewContracts() {
       ${CACHE.contracts.length ? `<div class="table-wrap"><table><tr><th>المستأجر</th><th>الوحدة</th><th>الإيجار</th><th>الفترة</th><th>المدفوع</th><th>المستحق</th><th>المتأخرات</th><th>الحالة</th><th></th></tr>
         ${CACHE.contracts.map((c) => `<tr><td><strong>${esc(c.tenant_name)}</strong></td><td>${esc(c.unit_name)} — ${esc(c.property_name)}</td>
           <td>${money(c.rent_amount)} <span class="muted">(إجمالي العقد)</span><br><span class="muted">القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</span></td>
-          <td>${esc(c.start_date)}<br><span class="muted">${c.end_date ? 'إلى ' + esc(c.end_date) : 'مفتوح'}</span></td>
+          <td>${esc(contractDateDisp(c, c.start_date))}<br><span class="muted">${c.end_date ? 'إلى ' + esc(contractDateDisp(c, c.end_date)) : 'مفتوح'}</span>${c.calendar === 'hijri' ? ' <span class="badge">هجري</span>' : ''}</td>
           <td class="money paid-green">${money(c.total_paid)}</td><td>${money(c.total_due)}</td>
           <td class="${c.arrears > 0 ? 'arrears due-red' : ''}">${money(c.arrears)}</td>
           <td><span class="badge ${(CONTRACT_STATUS[c.status] || CONTRACT_STATUS.ended)[1]}">${(CONTRACT_STATUS[c.status] || CONTRACT_STATUS.ended)[0]}</span></td>
@@ -844,8 +849,23 @@ function contractForm(id, prefill) {
     <label>الوحدة *<select name="unit_id" required>${CACHE.units.map((u) => `<option value="${u.id}" ${c.unit_id === u.id ? 'selected' : ''}>${esc(u.name)} — ${esc(propName(u.property_id))}</option>`).join('')}</select></label>
     <label>بحث المستأجر<input id="ctTenantSearch" type="text" placeholder="ابحث بالاسم أو رقم الجوال أو رقم العقد…"></label>
     <label>المستأجر *<select name="tenant_id" required>${CACHE.tenants.map((t) => `<option value="${t.id}" ${c.tenant_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
-    <label>تاريخ البداية *<input name="start_date" type="date" required value="${esc(c.start_date || todayStr())}"></label>
-    <label>تاريخ النهاية (اختياري)<input name="end_date" type="date" value="${esc(c.end_date || '')}"></label>
+    <label>تقويم العقد<select name="calendar" id="ctCal"><option value="gregorian" ${c.calendar !== 'hijri' ? 'selected' : ''}>ميلادي</option><option value="hijri" ${c.calendar === 'hijri' ? 'selected' : ''}>هجري</option></select></label>
+    <div id="ctGreg">
+      <label>تاريخ البداية *<input name="start_date" type="date" required value="${esc(c.start_date || todayStr())}"></label>
+      <label>تاريخ النهاية (اختياري)<input name="end_date" type="date" value="${esc(c.end_date || '')}"></label>
+    </div>
+    <div id="ctHijri" class="hidden">
+      <label>تاريخ البداية (هجري) *<span style="display:flex;gap:6px">
+        <input id="csHd" name="cs_h_d" type="number" min="1" max="30" placeholder="اليوم">
+        <select id="csHm" name="cs_h_m">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select>
+        <input id="csHy" name="cs_h_y" type="number" min="1300" max="1600" placeholder="السنة">
+      </span></label>
+      <label>تاريخ النهاية (هجري — اختياري)<span style="display:flex;gap:6px">
+        <input id="ceHd" name="ce_h_d" type="number" min="1" max="30" placeholder="اليوم">
+        <select id="ceHm" name="ce_h_m">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select>
+        <input id="ceHy" name="ce_h_y" type="number" min="1300" max="1600" placeholder="السنة">
+      </span></label>
+    </div>
     <label>إجمالي إيجار العقد (لكامل المدة) (ر.س) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
     <label>دورة السداد<select name="cycle">${Object.entries(CYCLE_LABELS).map(([v, l]) => `<option value="${v}" ${c.cycle === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label>عدد الدفعات (الأقساط)<input name="installments_count" type="number" step="1" min="1" value="${c.installments_count ?? ''}" placeholder="يُحسب تلقائياً من المدة"></label>
@@ -854,6 +874,20 @@ function contractForm(id, prefill) {
     <label>الحالة<select name="status"><option value="active" ${c.status === 'active' ? 'selected' : ''}>سارٍ</option><option value="renewed" ${c.status === 'renewed' ? 'selected' : ''}>مُجدَّد</option><option value="ended" ${c.status === 'ended' ? 'selected' : ''}>منتهٍ</option><option value="vacated" ${c.status === 'vacated' ? 'selected' : ''}>خرج وإخلاء</option></select></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(c.notes || '')}</textarea></label>`,
     async (data) => {
+      // تقويم العقد: في وضع الهجري تُحوَّل المدخلات إلى ميلادي ISO (صيغة التخزين القياسية)
+      if (data.calendar !== 'hijri') data.calendar = 'gregorian';
+      if (data.calendar === 'hijri') {
+        const sIso = hijriToIso(data.cs_h_y, data.cs_h_m, data.cs_h_d);
+        if (!sIso) throw new Error('تاريخ بداية العقد الهجري غير مكتمل أو غير صالح');
+        data.start_date = sIso;
+        if (data.ce_h_y || data.ce_h_d) {
+          const eIso = hijriToIso(data.ce_h_y, data.ce_h_m, data.ce_h_d);
+          if (!eIso) throw new Error('تاريخ نهاية العقد الهجري غير مكتمل أو غير صالح');
+          data.end_date = eIso;
+        } else data.end_date = null;
+      }
+      delete data.cs_h_d; delete data.cs_h_m; delete data.cs_h_y;
+      delete data.ce_h_d; delete data.ce_h_m; delete data.ce_h_y;
       data.unit_id = Number(data.unit_id); data.tenant_id = Number(data.tenant_id);
       data.rent_amount = Number(data.rent_amount); data.deposit = Number(data.deposit || 0);
       data.installments_count = data.installments_count ? Number(data.installments_count) : null;
@@ -895,6 +929,33 @@ function contractForm(id, prefill) {
     };
     unitSearchEl.addEventListener('input', refillUnits);
     tenantSearchEl.addEventListener('input', refillTenants);
+    // تقويم العقد (ميلادي/هجري): مزامنة الاتجاهين بين حقول التاريخ الميلادية
+    // والهجرية حتى تعمل حسابات المدة وعدد الدفعات من القيم الميلادية دائماً
+    const calSel = document.getElementById('ctCal');
+    const ctGregBox = document.getElementById('ctGreg');
+    const ctHijriBox = document.getElementById('ctHijri');
+    const fillHijriFromGreg = () => {
+      const s = startEl.value ? isoToHijriParts(startEl.value) : null;
+      const e = endEl.value ? isoToHijriParts(endEl.value) : null;
+      if (s) { $('#csHd').value = s.d; $('#csHm').value = s.m; $('#csHy').value = s.y; }
+      if (e) { $('#ceHd').value = e.d; $('#ceHm').value = e.m; $('#ceHy').value = e.y; }
+    };
+    const fillGregFromHijri = () => {
+      const s = hijriToIso($('#csHy').value, $('#csHm').value, $('#csHd').value);
+      const e = hijriToIso($('#ceHy').value, $('#ceHm').value, $('#ceHd').value);
+      if (s) startEl.value = s;
+      if (e) endEl.value = e;
+    };
+    const applyCal = () => {
+      if (calSel.value === 'hijri') { fillHijriFromGreg(); ctGregBox.classList.add('hidden'); ctHijriBox.classList.remove('hidden'); }
+      else { fillGregFromHijri(); ctHijriBox.classList.add('hidden'); ctGregBox.classList.remove('hidden'); }
+    };
+    calSel.addEventListener('change', applyCal);
+    ['csHd', 'csHm', 'csHy', 'ceHd', 'ceHm', 'ceHy'].forEach((hid) => {
+      const el = document.getElementById(hid);
+      if (el) el.addEventListener('change', () => { fillGregFromHijri(); onDates(); });
+    });
+    if (calSel.value === 'hijri') applyCal();
     const autoCount = () => {
       const n = periodCountStr(startEl.value, endEl.value, cycleEl.value);
       return n > 0 ? n : (CYCLE_YEAR_COUNT_F[cycleEl.value] || 12);
@@ -1332,7 +1393,7 @@ async function showReceipt(paymentId, justCreated = false) {
         ${r.tenant && r.tenant.id_number ? `<tr><td>رقم الهوية</td><td>${esc(r.tenant.id_number)}</td></tr>` : ''}
         ${isRent ? `<tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>` : `<tr><td>الوحدة</td><td>${esc(r.unit ? r.unit.name : '')}</td></tr>`}
         ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
-        ${isRent ? `<tr><td>العقد</td><td>من ${esc(r.contract ? r.contract.start_date : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(r.contract.end_date) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>` : ''}
+        ${isRent ? `<tr><td>العقد</td><td>من ${esc(r.contract ? contractDateDisp(r.contract, r.contract.start_date) : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(contractDateDisp(r.contract, r.contract.end_date)) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>` : ''}
         ${p.period_from && p.period_to ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
         ${isRent && r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
         <tr><td>المبلغ المستلم</td><td><strong>${money(p.amount)}</strong></td></tr>
@@ -1513,7 +1574,7 @@ function printLease(contractId) {
         <tr><td>العقار / العنوان</td><td>${esc(property.name || c.property_name || '')}${property.address ? ' — ' + esc(property.address) : ''}</td></tr>
         <tr><td>الأجرة</td><td>إجمالي إيجار العقد لكامل المدة: ${money(c.rent_amount)}</td></tr>
         <tr><td>الدفعات</td><td>قيمة القسط: ${money(c.installment_amount)} × ${c.installments_total} دفعة — دورة السداد: ${esc(CYCLE_LABELS[c.cycle] || c.cycle)}</td></tr>
-        <tr><td>مدة العقد</td><td>من ${esc(c.start_date)} ${c.end_date ? 'إلى ' + esc(c.end_date) : '(عقد مفتوح حتى إشعار آخر باتفاق الطرفين)'}</td></tr>
+        <tr><td>مدة العقد</td><td>من ${esc(contractDateDisp(c, c.start_date))} ${c.end_date ? 'إلى ' + esc(contractDateDisp(c, c.end_date)) : '(عقد مفتوح حتى إشعار آخر باتفاق الطرفين)'}${c.calendar === 'hijri' ? ' (بالتقويم الهجري)' : ''}</td></tr>
         ${Number(c.deposit) ? `<tr><td>مبلغ التأمين</td><td>${money(c.deposit)}</td></tr>` : ''}
       </table>
       <h4>بنود عامة</h4>
