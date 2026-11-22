@@ -4,12 +4,12 @@ const crypto = require('crypto');
 const express = require('express');
 const ExcelJS = require('exceljs');
 const db = require('./db');
-const calc = require('./calc');
-const drive = require('./drive');
+const calc = require('./lib/calc');
+const drive = require('./lib/drive');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname, 'public')));
 
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'change-me-123';
@@ -670,7 +670,7 @@ app.get('/api/tenants-search', auth, async (req, res) => {
     for (const t of tenants) {
       const tContracts = contracts.filter((c) => c.tenant_id === t.id);
       const unitNames = tContracts.map((c) => (unitById[c.unit_id] || {}).name || '').join(' ');
-      const hay = `${t.name} ${t.phone} ${t.id_number} ${unitNames}`;
+      const hay = `${t.name} ${t.phone} ${t.id_number} ${t.contract_no || ''} ${unitNames}`;
       if (q && !hay.includes(q)) continue;
       let totalPaid = 0, receipts = 0, arrears = 0;
       for (const c of tContracts) {
@@ -1524,7 +1524,7 @@ app.get('/api/search', auth, async (req, res) => {
     const propById = Object.fromEntries(properties.map((p) => [p.id, p]));
     const propNameOfUnit = (u) => (u ? (propById[u.property_id] || {}).name || '' : '');
 
-    const tenantHits = tenants.filter((t) => has(t.name) || has(t.phone) || has(t.id_number));
+    const tenantHits = tenants.filter((t) => has(t.name) || has(t.phone) || has(t.id_number) || has(t.contract_no));
     const tenantIds = new Set(tenantHits.map((t) => t.id));
     const unitHits = units.filter((u) => has(u.name) || has(propNameOfUnit(u)));
     const unitIds = new Set(unitHits.map((u) => u.id));
@@ -1543,7 +1543,7 @@ app.get('/api/search', auth, async (req, res) => {
     const LIM = 25;
     res.json({
       tenants: tenantHits.slice(0, LIM).map((t) => ({
-        id: t.id, name: t.name, phone: t.phone || '', id_number: t.id_number || '',
+        id: t.id, name: t.name, phone: t.phone || '', id_number: t.id_number || '', contract_no: t.contract_no || '',
       })),
       contracts: contractHits.slice(0, LIM).map((c) => {
         const u = unitById[c.unit_id] || {};
@@ -1755,7 +1755,7 @@ app.post('/api/backups/:id/restore', auth, adminOnly, async (req, res) => {
 
 // أي مسار آخر يعيد واجهة التطبيق
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;

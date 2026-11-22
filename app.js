@@ -332,6 +332,7 @@ const propName = (id) => (CACHE.properties.find((p) => p.id === Number(id)) || {
 const unitName = (id) => (CACHE.units.find((u) => u.id === Number(id)) || {}).name || '';
 const tenantName = (id) => (CACHE.tenants.find((t) => t.id === Number(id)) || {}).name || '';
 const CYCLE_LABELS = { monthly: 'شهري', quarterly: 'ربع سنوي', semiannual: 'نصف سنوي', annual: 'سنوي' };
+const CONTRACT_STATUS = { active: ['سارٍ', 'green'], renewed: ['مُجدَّد', ''], ended: ['منتهٍ', 'gray'], vacated: ['خرج وإخلاء', 'red'] };
 
 // ---------------- لوحة المتابعة ----------------
 async function viewDashboard() {
@@ -409,7 +410,7 @@ function globalSearchResults(r) {
   if (r.tenants.length) {
     html += `<h4 style="margin:12px 0 6px">المستأجرون</h4>` + r.tenants.map((t) => `
       <div class="card" style="margin-bottom:6px"><strong>${esc(t.name)}</strong>
-      <span class="muted">${esc(t.phone || '')} · الهوية: ${esc(t.id_number || '—')}</span>
+      <span class="muted">${esc(t.phone || '')} · الهوية: ${esc(t.id_number || '—')}${t.contract_no ? ` · رقم العقد: ${esc(t.contract_no)}` : ''}</span>
       <button class="btn small primary" onclick="tenantProfile(${t.id})">فتح ملف المستأجر</button></div>`).join('');
   }
   if (r.units.length) {
@@ -445,6 +446,7 @@ function tenantResultCards(results) {
   return results.map((t) => `
     <div class="card" style="margin-bottom:8px">
       <strong>${esc(t.name)}</strong> <span class="muted">${esc(t.phone || '')}</span>
+      ${t.contract_no ? `<span class="badge">رقم العقد: ${esc(t.contract_no)}</span>` : ''}
       ${t.units && t.units.length ? `<span class="badge">${esc(t.units.join('، '))}</span>` : ''}
       <div style="margin-top:6px">إجمالي ما سدده: <span class="money">${money(t.total_paid)}</span> ·
       سندات: ${t.receipts_count} · المتأخرات: <span class="${t.arrears > 0 ? 'arrears' : ''}">${money(t.arrears)}</span></div>
@@ -675,10 +677,10 @@ async function viewTenants() {
   main().innerHTML = `
     <div class="section">
       <div class="section-head"><h3>المستأجرون</h3><button class="btn primary" onclick="tenantForm()">+ إضافة مستأجر</button></div>
-      <div class="search-row"><input id="tenantSearch" placeholder="ابحث بالاسم أو رقم الجوال أو رقم الوحدة…"><button class="btn primary" id="tenantSearchBtn">بحث</button></div>
+      <div class="search-row"><input id="tenantSearch" placeholder="ابحث بالاسم أو رقم الجوال أو رقم العقد أو رقم الوحدة…"><button class="btn primary" id="tenantSearchBtn">بحث</button></div>
       <div id="tenantResults">${tenantResultCards(all)}</div>
-      <div class="table-wrap"><table><tr><th>الاسم</th><th>الجوال</th><th>الهوية</th><th></th></tr>
-      ${CACHE.tenants.map((t) => `<tr><td><strong>${esc(t.name)}</strong></td><td>${esc(t.phone || '')}</td><td>${esc(t.id_number || '')}</td>
+      <div class="table-wrap"><table><tr><th>الاسم</th><th>الجوال</th><th>الهوية</th><th>رقم العقد</th><th></th></tr>
+      ${CACHE.tenants.map((t) => `<tr><td><strong>${esc(t.name)}</strong></td><td>${esc(t.phone || '')}</td><td>${esc(t.id_number || '')}</td><td>${esc(t.contract_no || '')}</td>
         <td><button class="btn small primary" onclick="tenantProfile(${t.id})">الملف</button>
         <button class="btn small" onclick="tenantForm(${t.id})">تعديل</button>
         ${delBtn('tenants', t.id, esc(t.name))}</td></tr>`).join('')}</table></div>
@@ -696,6 +698,7 @@ function tenantForm(id) {
     <label>الاسم *<input name="name" required value="${esc(t.name || '')}"></label>
     <label>رقم الجوال<input name="phone" value="${esc(t.phone || '')}"></label>
     <label>رقم الهوية<input name="id_number" value="${esc(t.id_number || '')}"></label>
+    <label>رقم العقد<input name="contract_no" value="${esc(t.contract_no || '')}" placeholder="الرقم الذي تضيفه يظهر في كل سندات المستأجر"></label>
     <label>البريد الإلكتروني<input name="email" value="${esc(t.email || '')}"></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(t.notes || '')}</textarea></label>`,
     async (data) => { id ? await api(`/api/tenants/${id}`, { method: 'PUT', body: JSON.stringify(data) }) : await api('/api/tenants', { method: 'POST', body: JSON.stringify(data) }); render(); });
@@ -709,7 +712,7 @@ async function tenantProfile(id) {
       <div class="card"><div class="lbl">عدد السندات</div><div class="num" style="font-size:18px">${p.receipts_count}</div></div>
       <div class="card warn"><div class="lbl">المتأخرات</div><div class="num" style="font-size:18px">${money(p.arrears)}</div></div>
     </div>
-    <p class="muted">الجوال: ${esc(p.tenant.phone || '—')} · الهوية: ${esc(p.tenant.id_number || '—')}</p>
+    <p class="muted">الجوال: ${esc(p.tenant.phone || '—')} · الهوية: ${esc(p.tenant.id_number || '—')}${p.tenant.contract_no ? ` · رقم العقد: ${esc(p.tenant.contract_no)}` : ''}</p>
     <div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap">
       ${p.arrears > 0 ? reminderBtn(p.tenant.id, p.arrears) : ''}
       <button class="btn small" onclick="showAttachments('tenant', ${p.tenant.id}, 'المستأجر')">📎 مرفقات المستأجر</button>
@@ -752,7 +755,7 @@ async function viewContracts() {
           <td>${esc(c.start_date)}<br><span class="muted">${c.end_date ? 'إلى ' + esc(c.end_date) : 'مفتوح'}</span></td>
           <td class="money">${money(c.total_paid)}</td><td>${money(c.total_due)}</td>
           <td class="${c.arrears > 0 ? 'arrears' : ''}">${money(c.arrears)}</td>
-          <td><span class="badge ${c.status === 'active' ? 'green' : 'gray'}">${c.status === 'active' ? 'سارٍ' : 'منتهٍ'}</span></td>
+          <td><span class="badge ${(CONTRACT_STATUS[c.status] || CONTRACT_STATUS.ended)[1]}">${(CONTRACT_STATUS[c.status] || CONTRACT_STATUS.ended)[0]}</span></td>
           <td><button class="btn small primary" onclick="paymentForm(${c.id})">+ سند</button>
           <button class="btn small" onclick="renewContract(${c.id})">🔄 تجديد</button>
           <button class="btn small" onclick="showTenantStatement(${c.id})">كشف حساب</button>
@@ -794,14 +797,22 @@ function contractForm(id, prefill) {
     <label>عدد الدفعات (الأقساط)<input name="installments_count" type="number" step="1" min="1" value="${c.installments_count ?? ''}" placeholder="يُحسب تلقائياً من المدة"></label>
     <p class="muted" id="ctHint" style="margin:-4px 0 10px"></p>
     <label>التأمين (ر.س)<input name="deposit" type="number" step="0.01" min="0" value="${c.deposit ?? 0}"></label>
-    <label>الحالة<select name="status"><option value="active" ${c.status === 'active' ? 'selected' : ''}>سارٍ</option><option value="ended" ${c.status === 'ended' ? 'selected' : ''}>منتهٍ</option></select></label>
+    <label>الحالة<select name="status"><option value="active" ${c.status === 'active' ? 'selected' : ''}>سارٍ</option><option value="renewed" ${c.status === 'renewed' ? 'selected' : ''}>مُجدَّد</option><option value="ended" ${c.status === 'ended' ? 'selected' : ''}>منتهٍ</option><option value="vacated" ${c.status === 'vacated' ? 'selected' : ''}>خرج وإخلاء</option></select></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(c.notes || '')}</textarea></label>`,
     async (data) => {
       data.unit_id = Number(data.unit_id); data.tenant_id = Number(data.tenant_id);
       data.rent_amount = Number(data.rent_amount); data.deposit = Number(data.deposit || 0);
       data.installments_count = data.installments_count ? Number(data.installments_count) : null;
       if (!data.end_date) data.end_date = null;
-      id ? await api(`/api/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) }) : await api('/api/contracts', { method: 'POST', body: JSON.stringify(data) });
+      if (id) {
+        await api(`/api/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+      } else {
+        await api('/api/contracts', { method: 'POST', body: JSON.stringify(data) });
+        // عند حفظ تجديد: يُعلَّم العقد الأصلي تلقائياً بحالة «مُجدَّد»
+        if (c && c.renewed_from) {
+          try { await api(`/api/contracts/${c.renewed_from}`, { method: 'PUT', body: JSON.stringify({ status: 'renewed' }) }); } catch (_) {}
+        }
+      }
       render();
     });
   // تعبئة عدد الدفعات تلقائياً من التواريخ والدورة (قابلة للتجاوز اليدوي) + تلميح حي لقيمة الدفعة
@@ -895,6 +906,7 @@ function makeQrSvg(text) {
 // دالة صافية — لا يُحفظ شيء حتى يؤكد المستخدم النموذج عبر إنشاء عقد جديد.
 function renewalPrefill(c) {
   const out = {
+    renewed_from: c.id,
     tenant_id: c.tenant_id, unit_id: c.unit_id,
     rent_amount: c.rent_amount, cycle: c.cycle,
     installments_count: c.installments_count ?? null,
@@ -1097,6 +1109,7 @@ async function showReceipt(paymentId, justCreated = false) {
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
         ${r.tenant && r.tenant.id_number ? `<tr><td>رقم الهوية</td><td>${esc(r.tenant.id_number)}</td></tr>` : ''}
+        ${r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
         ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
         <tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>
         <tr><td>العقد</td><td>من ${esc(r.contract ? r.contract.start_date : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(r.contract.end_date) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>
@@ -1272,6 +1285,7 @@ function printLease(contractId) {
         <tr><td>الطرف الثاني (المستأجر)</td><td><strong>${esc(tenant.name || c.tenant_name || '')}</strong></td></tr>
         <tr><td>جوال المستأجر</td><td>${esc(tenant.phone || '—')}</td></tr>
         <tr><td>هوية المستأجر</td><td>${esc(tenant.id_number || '—')}</td></tr>
+        ${tenant.contract_no ? `<tr><td>رقم العقد</td><td>${esc(tenant.contract_no)}</td></tr>` : ''}
         <tr><td>الوحدة المؤجرة</td><td>${esc(unit.name || c.unit_name || '')}${unit.type ? ' (' + esc(unit.type) + ')' : ''}${unit.floor ? ' — الدور: ' + esc(unit.floor) : ''}</td></tr>
         <tr><td>العقار / العنوان</td><td>${esc(property.name || c.property_name || '')}${property.address ? ' — ' + esc(property.address) : ''}</td></tr>
         <tr><td>الأجرة</td><td>إجمالي إيجار العقد لكامل المدة: ${money(c.rent_amount)}</td></tr>

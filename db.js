@@ -7,7 +7,7 @@ const path = require('path');
 const TABLES = {
   properties: ['name', 'address', 'owner_name', 'notes'],
   units: ['property_id', 'name', 'type', 'floor', 'default_rent', 'status', 'notes'],
-  tenants: ['name', 'phone', 'id_number', 'email', 'notes'],
+  tenants: ['name', 'phone', 'id_number', 'email', 'notes', 'contract_no'],
   contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'installments_count', 'deposit', 'status', 'notes'],
   payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by'],
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS units (
   status TEXT NOT NULL DEFAULT 'شاغرة', notes TEXT DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS tenants (
   id SERIAL PRIMARY KEY, name TEXT NOT NULL, phone TEXT DEFAULT '', id_number TEXT DEFAULT '',
-  email TEXT DEFAULT '', notes TEXT DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+  email TEXT DEFAULT '', notes TEXT DEFAULT '', contract_no TEXT DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS contract_no TEXT DEFAULT '';
 CREATE TABLE IF NOT EXISTS contracts (
   id SERIAL PRIMARY KEY, unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
