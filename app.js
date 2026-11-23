@@ -1111,7 +1111,8 @@ async function showLetter(contractId) {
       lastSavedLetterKey = key;
     } catch (e) { savedNote = '<p class="error" style="font-size:12px">تعذّر حفظ الخطاب (ظهر لك للطباعة والإرسال فقط).</p>'; }
   }
-  const waBtn = t.phone ? `<a class="btn" style="text-align:center;text-decoration:none;line-height:2" href="${reminderLink(t.phone, waText)}" target="_blank" rel="noopener">💬 إرسال واتساب</a>` : '';
+  const waBtn = `<button class="btn" onclick="shareDocPdf()">📤 إرسال الخطاب PDF واتساب</button>`;
+  setDocPdf(`خطاب-${c.tenant_name || 'مستأجر'}.pdf`, t.phone || '');
   openModal(LETTER_TYPE_LABELS[type] || 'خطاب للمستأجر', doc + `
     <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>${waBtn}</div>${savedNote}`);
   $('#printArea').innerHTML = doc;
@@ -1162,7 +1163,8 @@ async function showSavedLetter(id) {
   try { d = JSON.parse(r.data || '{}'); } catch (e) { d = {}; }
   const doc = renderLetterDoc(r.type, r.lang2 || '', d, s);
   const t = (CACHE.tenants || []).find((x) => x.id === Number(r.tenant_id)) || {};
-  const waBtn = t.phone && r.text ? `<a class="btn" style="text-align:center;text-decoration:none;line-height:2" href="${reminderLink(t.phone, r.text)}" target="_blank" rel="noopener">💬 إرسال واتساب</a>` : '';
+  const waBtn = `<button class="btn" onclick="shareDocPdf()">📤 إرسال الخطاب PDF واتساب</button>`;
+  setDocPdf(`خطاب-رقم-${r.id}.pdf`, t.phone || '');
   openModal(`خطاب محفوظ رقم ${r.id} — ${esc(LETTER_TYPE_LABELS[r.type] || '')}`, doc + `
     <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>${waBtn}</div>`);
   $('#printArea').innerHTML = doc;
@@ -1423,19 +1425,14 @@ function receiptWaLink(r) {
   const phone = r.tenant ? r.tenant.phone : '';
   return `https://wa.me/${normalizePhone(phone)}?text=${encodeURIComponent(receiptWhatsAppText(r))}`;
 }
-// زر إرسال السند واتساب من بيانات سند محمّلة — معطّل مع شرح إن لم يوجد جوال للمستأجر
+// زر إرسال السند PDF واتساب (تحديث 47): يُنشئ PDF من السند ويشاركه —
+// قائمة المشاركة لا تحتاج رقم الجوال (يختار عبده المحادثة بنفسه)
 function receiptWaBtn(r) {
-  const phone = r.tenant ? r.tenant.phone : '';
-  if (!phone) {
-    return `<button class="btn" disabled title="لا يوجد رقم جوال مسجل لهذا المستأجر — أضف الرقم من ملف المستأجر أولاً">📤 إرسال السند واتساب</button> <span class="muted" style="font-size:12px">لا يوجد جوال مسجل</span>`;
-  }
-  return `<a class="btn" style="text-align:center;text-decoration:none;line-height:2" href="${receiptWaLink(r)}" target="_blank" rel="noopener">📤 إرسال السند واتساب</a>`;
+  return `<button class="btn" onclick="shareDocPdf()">📤 إرسال السند PDF واتساب</button>`;
 }
-// زر إرسال من قائمة السندات: يجلب بيانات السند كاملة ثم يفتح واتساب
+// زر إرسال من قائمة السندات: يفتح السند ومنه زر إرسال PDF
 async function sendReceiptWhatsApp(paymentId) {
-  const r = await api(`/api/payments/${paymentId}/receipt`);
-  if (!r.tenant || !r.tenant.phone) return;
-  window.open(receiptWaLink(r), '_blank', 'noopener');
+  await showReceipt(paymentId);
 }
 // توليد رمز QR (SVG) محلياً بالكامل عبر مكتبة qrcode.js المضمّنة — بلا أي شبكة
 let qrUtf8Ready = false;
@@ -1885,6 +1882,7 @@ async function showReceipt(paymentId, justCreated = false) {
       <div class="signatures"><div>توقيع المستلم: ____________</div><div>توقيع المدير: ____________</div></div>
     </div>
     <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printReceipt()">🖨️ معاينة وطباعة</button>${receiptWaBtn(r)}</div>`;
+  setDocPdf(`سند-قبض-${String(r.receipt_no).padStart(4, '0')}.pdf`, r.tenant ? r.tenant.phone : '');
   openModal(justCreated ? `✅ تم إصدار سند قبض رقم ${String(r.receipt_no).padStart(4, '0')}` : 'سند قبض', html);
   $('#printArea').innerHTML = html.split('<div class="form-actions"')[0];
 }
@@ -1905,6 +1903,77 @@ function closePrintPreview() {
   if (pv) pv.classList.add('hidden');
 }
 function printNowFromPreview() { window.print(); }
+// ---------------- إرسال المستند PDF عبر واتساب (تحديث 47 — بطلب عبده) ----------------
+// واتساب لا يقبل إرفاق ملفات عبر روابط wa.me، فالحل: إنشاء PDF من المستند
+// نفسه داخل الجهاز ثم مشاركته عبر قائمة مشاركة النظام (يختار عبده واتساب
+// والمستأجر) — وإن لم يدعم المتصفح مشاركة الملفات يُنزَّل الملف وتُفتح
+// محادثة المستأجر لإرفاقه يدوياً.
+let lastDocPdf = { file: 'document.pdf', phone: '' };
+function setDocPdf(file, phone) { lastDocPdf = { file: file || 'document.pdf', phone: phone || '' }; }
+async function shareDocPdf() {
+  const cleanup = () => {
+    document.documentElement.classList.remove('pdf-mode');
+    const st = document.getElementById('pdfStage');
+    if (st) st.remove();
+  };
+  try {
+    if (typeof html2canvas === 'undefined' || !window.jspdf || !window.jspdf.jsPDF) {
+      alert('مكتبات إنشاء PDF لم تُحمَّل بعد — حدّث الصفحة وحاول مرة أخرى');
+      return;
+    }
+    const src = document.querySelector('#printArea > div');
+    if (!src) { alert('لا يوجد مستند معروض حالياً — افتح السند أو الخطاب أو كشف الحساب أولاً'); return; }
+    const stage = document.createElement('div');
+    stage.id = 'pdfStage';
+    stage.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;padding:10px;direction:rtl';
+    stage.appendChild(src.cloneNode(true));
+    document.body.appendChild(stage);
+    document.documentElement.classList.add('pdf-mode');
+    await new Promise((r) => setTimeout(r, 80));
+    const canvas = await html2canvas(stage, { scale: 2, backgroundColor: '#ffffff', logging: false });
+    cleanup();
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const img = canvas.toDataURL('image/jpeg', 0.92);
+    const pageW = 210, pageH = 297;
+    const imgH = (canvas.height * pageW) / canvas.width;
+    const onePageDoc = src.classList.contains('receipt-doc') || src.classList.contains('letter-doc');
+    if (imgH <= pageH) {
+      pdf.addImage(img, 'JPEG', 0, 0, pageW, imgH);
+    } else if (onePageDoc) {
+      // السندات والخطابات ورقة واحدة دائماً: تصغير متناسب عند الحاجة
+      const w = (pageW * pageH) / imgH;
+      pdf.addImage(img, 'JPEG', (pageW - w) / 2, 0, w, pageH);
+    } else {
+      let page = 0;
+      while (page * pageH < imgH) {
+        if (page > 0) pdf.addPage();
+        pdf.addImage(img, 'JPEG', 0, -page * pageH, pageW, imgH);
+        page++;
+      }
+    }
+    const blob = pdf.output('blob');
+    const file = new File([blob], lastDocPdf.file, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: lastDocPdf.file }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = lastDocPdf.file;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    if (lastDocPdf.phone) {
+      alert('تم تنزيل ملف PDF على جهازك — هتتفتح دلوقتي محادثة المستأجر في واتساب، أرفق الملف اللي نزل من المحادثة.');
+      window.open(reminderLink(lastDocPdf.phone, 'مرفق لكم المستند بصيغة PDF.'), '_blank', 'noopener');
+    } else {
+      alert('تم تنزيل ملف PDF على جهازك — أرفقه من داخل واتساب للمستأجر.');
+    }
+  } catch (e) {
+    cleanup();
+    alert('تعذّر إنشاء ملف PDF — حاول مرة أخرى');
+  }
+}
 
 // ---------------- المصروفات ----------------
 async function viewExpenses() {
@@ -2013,7 +2082,8 @@ async function showExpenseVoucher(expenseId, justCreated = false) {
       <div class="amount-words">المبلغ بالحروف: ${esc(tafqeet(e.amount))}</div>
       <div class="signatures"><div>المستلم: ____________</div><div>المحاسب: ____________</div><div>الاعتماد: ____________</div></div>
     </div>
-    <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printReceipt()">🖨️ معاينة وطباعة</button></div>`;
+    <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printReceipt()">🖨️ معاينة وطباعة</button><button class="btn" onclick="shareDocPdf()">📤 إرسال السند PDF واتساب</button></div>`;
+  setDocPdf(`سند-صرف-${r.voucher_no ? String(r.voucher_no).padStart(4, '0') : 'بدون-رقم'}.pdf`, '');
   openModal(justCreated ? `✅ تم إصدار سند صرف رقم ${r.voucher_no ? String(r.voucher_no).padStart(4, '0') : ''}` : 'سند صرف', html);
   $('#printArea').innerHTML = html.split('<div class="form-actions"')[0];
 }
@@ -2034,7 +2104,8 @@ async function showTenantStatement(contractId) {
       </table>
       <h3 style="text-align:center">إجمالي المستحق: ${money(s.total_due)} · إجمالي مدفوعات الإيجار: ${money(s.total_paid)}${s.total_other_paid ? ` · مدفوعات أخرى: ${money(s.total_other_paid)}` : ''} · رصيد الإيجار المتبقي: ${money(s.remaining)}</h3>
     </div>`;
-  openModal('كشف حساب مستأجر', doc + `<div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button></div>`);
+  setDocPdf(`كشف-حساب-${s.tenant ? s.tenant.name : 'مستأجر'}.pdf`, s.tenant ? s.tenant.phone : '');
+  openModal('كشف حساب مستأجر', doc + `<div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button><button class="btn" onclick="shareDocPdf()">📤 إرسال الكشف PDF واتساب</button></div>`);
   $('#printArea').innerHTML = doc;
 }
 

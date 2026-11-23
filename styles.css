@@ -130,6 +130,42 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
   .letter-doc.letter-many .letter-sig { margin-top: 6px; }
   .letter-doc.letter-many .letter-stamp-row { margin-top: 8px; }
 }
+/* وضع إنشاء PDF (تحديث 47): نفس ضغط الطباعة يُفعَّل بكلاس على الصفحة أثناء
+   تصوير المستند خارج الشاشة، حتى يخرج الـ PDF بشكل نسخة الطباعة الرسمية */
+html.pdf-mode .receipt-doc { padding: 6px 12px; border-width: 1.5px; }
+html.pdf-mode .receipt-doc .company-header { padding-bottom: 4px; margin-bottom: 6px; }
+html.pdf-mode .receipt-doc .company-header div { line-height: 1.35; }
+html.pdf-mode .receipt-doc .company-header .company-name { font-size: 17px; }
+html.pdf-mode .receipt-doc .company-header .company-logo { max-height: 115px; margin-bottom: 4px; }
+html.pdf-mode .receipt-doc .doc-stamp { margin: 3px auto 4px; padding: 3px 8px; font-size: 12.5px; }
+html.pdf-mode .receipt-doc h2 { font-size: 18px; }
+html.pdf-mode .receipt-doc .r-no { margin-bottom: 6px; font-size: 13px; }
+html.pdf-mode .receipt-doc table { font-size: 13px; }
+html.pdf-mode .receipt-doc td { padding: 2px 4px; }
+html.pdf-mode .receipt-doc .amount-words { padding: 4px 9px; margin: 4px 0; }
+html.pdf-mode .receipt-doc .receipt-verify { margin-top: 6px; gap: 10px; }
+html.pdf-mode .receipt-doc .receipt-verify .qr-box svg, html.pdf-mode .receipt-doc .receipt-verify .qr-box div { width: 70px !important; height: 70px !important; }
+html.pdf-mode .receipt-doc .receipt-verify .verify-note { font-size: 12px; line-height: 1.6; }
+html.pdf-mode .receipt-doc .signatures { margin-top: 4px; font-size: 12.5px; }
+html.pdf-mode .letter-doc { font-size: 10.8px; line-height: 1.5; }
+html.pdf-mode .letter-doc .company-header { padding-bottom: 3px; margin-bottom: 4px; }
+html.pdf-mode .letter-doc .company-header div { line-height: 1.25; font-size: 11px; }
+html.pdf-mode .letter-doc .company-header .company-name { font-size: 14px; }
+html.pdf-mode .letter-doc .company-header .company-logo { max-height: 64px; margin-bottom: 2px; }
+html.pdf-mode .letter-doc h2 { font-size: 13.5px; margin: 3px 0 4px; }
+html.pdf-mode .letter-doc p { margin: 3px 0; }
+html.pdf-mode .letter-doc .r-no { margin-bottom: 4px; font-size: 11px; }
+html.pdf-mode .letter-doc hr { margin: 5px 0 !important; }
+html.pdf-mode .letter-doc .letter-sig { margin-top: 8px; line-height: 1.5; }
+html.pdf-mode .letter-doc .letter-stamp-row { margin-top: 10px; }
+html.pdf-mode .letter-doc.letter-many { font-size: 9.6px; line-height: 1.42; }
+html.pdf-mode .letter-doc.letter-many .company-header .company-logo { max-height: 46px; }
+html.pdf-mode .letter-doc.letter-many .company-header .company-name { font-size: 13px; }
+html.pdf-mode .letter-doc.letter-many h2 { font-size: 12.5px; margin: 2px 0 3px; }
+html.pdf-mode .letter-doc.letter-many p { margin: 2px 0; }
+html.pdf-mode .letter-doc.letter-many hr { margin: 4px 0 !important; }
+html.pdf-mode .letter-doc.letter-many .letter-sig { margin-top: 6px; }
+html.pdf-mode .letter-doc.letter-many .letter-stamp-row { margin-top: 8px; }
 .company-header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 14px; }
 .company-header div { font-size: 13px; color: #444; line-height: 1.7; }
 .company-header .company-name { font-size: 20px; font-weight: 800; color: #111; }
