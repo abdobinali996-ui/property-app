@@ -138,6 +138,15 @@ function normalizeOwnerName(name) {
 function rentPayments(payments) { return (payments || []).filter(isRentPayment); }
 function sumAmounts(list) { return (list || []).reduce((s, p) => s + (Number(p.amount) || 0), 0); }
 
+// الرصيد الافتتاحي: مبلغ حصّله المكتب فعلياً قبل استخدام البرنامج. يغطي أقدم
+// الأقساط أولاً ويُنقص المتأخرات والمتبقي، لكنه ليس سند قبض: لا يدخل في
+// محصلات الشهور ولا في تقارير الملاك ولا رصيد المكتب.
+function openingAmount(contract) { return Math.max(0, Number(contract && contract.opening_paid) || 0); }
+function openingPayment(contract) {
+  const amt = openingAmount(contract);
+  return amt > 0 ? { id: 0, receipt_no: 0, amount: amt, purpose: 'إيجار', payment_date: contract.start_date, installment_no: null, _opening: true } : null;
+}
+
 // تواريخ بداية فترات الاستحقاق من بداية العقد حتى نهاية الحد المعطى.
 // للعقود الهجرية تُحسب البدايات من أصل تاريخ البداية بأشهر هجرية
 // (بداية + ترتيب الفترة × أشهر الدورة هجرياً) فلا يتراكم انحراف اليوم.
@@ -204,7 +213,7 @@ function contractSummary(contract, payments, asOf) {
   const totalDue = round2(amounts.slice(0, dueCount).reduce((s, a) => s + a, 0));
   // المدفوع لأغراض الإيجار فقط هو ما يغطي الأقساط؛ المدفوعات الأخرى تُرصد
   // منفصلة (other_paid) ولا تُنقص المستحق ولا المتأخرات ولا المتبقي
-  const totalPaid = round2(sumAmounts(rentPayments(payments)));
+  const totalPaid = round2(sumAmounts(rentPayments(payments)) + openingAmount(contract));
   const otherPaid = round2(sumAmounts((payments || []).filter((p) => !isRentPayment(p))));
   const arrears = Math.max(0, round2(totalDue - totalPaid));
 
@@ -215,6 +224,7 @@ function contractSummary(contract, payments, asOf) {
     due_periods: dueCount,
     total_due: totalDue,
     total_paid: totalPaid,
+    opening_paid: openingAmount(contract),
     other_paid: otherPaid,
     arrears,
     contract_total: total,
@@ -252,10 +262,16 @@ function installmentInfo(contract, payments, paymentId) {
       installment_amount: amounts[assigned - 1],
     };
   }
+  // الرصيد الافتتاحي يغطي أقساطاً كاملة من أول العقد: تُزاح بها أرقام أقساط
+  // السندات التلقائية بعدد الأقساط التي غطاها وحده تغطية كاملة
+  let offset = 0;
+  if (openingPayment(contract)) {
+    offset = installmentCoverage(contract, []).filter((e) => e.remaining <= 0).length;
+  }
   const sorted = rentPayments(payments).sort((a, b) =>
     ((a.receipt_no || 0) - (b.receipt_no || 0)) || ((a.id || 0) - (b.id || 0)));
   const idx = sorted.findIndex((p) => Number(p.id) === Number(paymentId));
-  const index = idx >= 0 ? idx + 1 : sorted.length;
+  const index = idx >= 0 ? offset + idx + 1 : offset + sorted.length;
   return {
     installment_index: index,
     installment_total: amounts.length || null,
@@ -317,8 +333,9 @@ function installmentSchedule(contract) {
 function installmentCoverage(contract, payments) {
   const schedule = installmentSchedule(contract);
   const covered = schedule.map(() => 0);
-  const sorted = rentPayments(payments).slice().sort((a, b) =>
-    ((a.receipt_no || 0) - (b.receipt_no || 0)) || ((a.id || 0) - (b.id || 0)));
+  const op = openingPayment(contract);
+  const sorted = [...(op ? [op] : []), ...rentPayments(payments).slice().sort((a, b) =>
+    ((a.receipt_no || 0) - (b.receipt_no || 0)) || ((a.id || 0) - (b.id || 0)))];
   for (const p of sorted) {
     let left = Number(p.amount) || 0;
     if (!(left > 0)) continue;
@@ -432,5 +449,6 @@ module.exports = {
   installmentSchedule, nextUnpaidInstallment, installmentBalance,
   installmentCoverage, installmentBalanceForPayment, installmentPeriod,
   paymentPurpose, isRentPayment, isOfficePayment, rentPayments, OFFICE_PURPOSE,
+  openingAmount, openingPayment,
   normalizeOwnerName,
 };

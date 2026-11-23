@@ -1147,7 +1147,7 @@ async function tenantProfile(id) {
     ${p.contracts.length ? p.contracts.map((c) => `<div class="card" style="margin-bottom:6px">
       <strong>${esc(c.unit_name)}</strong> — ${esc(c.property_name)} · إجمالي الإيجار: ${money(c.rent_amount)} · القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})<br>
       <span class="muted">من ${esc(c.start_date)} ${c.end_date ? 'إلى ' + esc(c.end_date) : ''}</span><br>
-      المدفوع: ${money(c.total_paid)} · المستحق: ${money(c.total_due)} · المتأخرات: <span class="${c.arrears > 0 ? 'arrears' : ''}">${money(c.arrears)}</span>
+      المدفوع: ${money(c.total_paid)} · المستحق: ${money(c.total_due)} · المتأخرات: <span class="${c.arrears > 0 ? 'arrears' : ''}">${money(c.arrears)}</span>${Number(c.opening_paid) > 0 ? `<br><span class="muted">منه رصيد افتتاحي (محصّل قبل البرنامج): ${money(c.opening_paid)}</span>` : ''}
       <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn small primary" onclick="closeModal();paymentForm(${c.id})">+ سند قبض لهذا العقد</button>
       <button class="btn small" onclick="showTenantStatement(${c.id})">كشف حساب</button>
       <button class="btn small" onclick="letterForm(${c.id})">📄 خطاب زيادة/إخلاء</button>
@@ -1180,7 +1180,7 @@ async function viewContracts() {
         ${CACHE.contracts.map((c) => `<tr><td><strong>${esc(c.tenant_name)}</strong></td><td>${esc(c.unit_name)} — ${esc(c.property_name)}</td>
           <td>${money(c.rent_amount)} <span class="muted">(إجمالي العقد)</span><br><span class="muted">القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</span></td>
           <td>${esc(contractDateDisp(c, c.start_date))}<br><span class="muted">${c.end_date ? 'إلى ' + esc(contractDateDisp(c, c.end_date)) : 'مفتوح'}</span>${c.calendar === 'hijri' ? ' <span class="badge">هجري</span>' : ''}</td>
-          <td class="money paid-green">${money(c.total_paid)}</td><td>${money(c.total_due)}</td>
+          <td class="money paid-green">${money(c.total_paid)}${Number(c.opening_paid) > 0 ? `<br><span class="muted" style="font-size:11px">منه افتتاحي: ${money(c.opening_paid)}</span>` : ''}</td><td>${money(c.total_due)}</td>
           <td class="${c.arrears > 0 ? 'arrears due-red' : ''}">${money(c.arrears)}</td>
           <td><span class="badge ${(CONTRACT_STATUS[c.status] || CONTRACT_STATUS.ended)[1]}">${(CONTRACT_STATUS[c.status] || CONTRACT_STATUS.ended)[0]}</span></td>
           <td><button class="btn small primary" onclick="paymentForm(${c.id})">+ سند</button>
@@ -1241,6 +1241,8 @@ function contractForm(id, prefill) {
     <label>دورة السداد<select name="cycle">${Object.entries(CYCLE_LABELS).map(([v, l]) => `<option value="${v}" ${c.cycle === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label>عدد الدفعات (الأقساط)<input name="installments_count" type="number" step="1" min="1" value="${c.installments_count ?? ''}" placeholder="يُحسب تلقائياً من المدة"></label>
     <p class="muted" id="ctHint" style="margin:-4px 0 10px"></p>
+    <label>محصّل قبل استخدام البرنامج — رصيد افتتاحي (${CUR.label})<input name="opening_paid" type="number" step="0.01" min="0" value="${c.opening_paid ?? ''}" placeholder="0"></label>
+    <p class="muted" style="margin:-4px 0 10px">للعقود التي بدأت قبل البرنامج: المبلغ الذي حصّلته فعلياً من المستأجر قبل البرنامج. يغطي أقدم الأقساط ويُلغي المتأخرات الوهمية، وهو ليس سند قبض ولا يدخل في محصلات الشهور.</p>
     <label>التأمين (${CUR.label})<input name="deposit" type="number" step="0.01" min="0" value="${c.deposit ?? 0}"></label>
     <label>الحالة<select name="status"><option value="active" ${c.status === 'active' ? 'selected' : ''}>سارٍ</option><option value="renewed" ${c.status === 'renewed' ? 'selected' : ''}>مُجدَّد</option><option value="ended" ${c.status === 'ended' ? 'selected' : ''}>منتهٍ</option><option value="vacated" ${c.status === 'vacated' ? 'selected' : ''}>خرج وإخلاء</option></select></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(c.notes || '')}</textarea></label>`,
@@ -1261,6 +1263,7 @@ function contractForm(id, prefill) {
       delete data.ce_h_d; delete data.ce_h_m; delete data.ce_h_y;
       data.unit_id = Number(data.unit_id); data.tenant_id = Number(data.tenant_id);
       data.rent_amount = Number(data.rent_amount); data.deposit = Number(data.deposit || 0);
+      data.opening_paid = Math.max(0, Number(data.opening_paid || 0));
       data.installments_count = data.installments_count ? Number(data.installments_count) : null;
       if (!data.end_date) data.end_date = null;
       if (id) {

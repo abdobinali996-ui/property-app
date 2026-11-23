@@ -683,6 +683,11 @@ app.get('/api/contracts/:id/statement', auth, async (req, res) => {
       if (i >= amounts.length) return;
       events.push({ date: calc.fmtDate(s), type: 'due', description: `قسط مستحق ${i + 1} من ${amounts.length}`, due: amounts[i], paid: 0 });
     });
+    // الرصيد الافتتاحي: سطر مدفوع في أول الكشف (محصّل قبل البرنامج — ليس سنداً)
+    const openingAmt = calc.openingAmount(contract);
+    if (openingAmt > 0) {
+      events.push({ date: calc.fmtDate(contract.start_date), type: 'opening', description: 'رصيد افتتاحي — محصّل قبل استخدام البرنامج', due: 0, paid: openingAmt });
+    }
     for (const p of cps) {
       const purpose = calc.paymentPurpose(p);
       if (calc.isRentPayment(p)) {
@@ -708,7 +713,7 @@ app.get('/api/contracts/:id/statement', auth, async (req, res) => {
       return { ...e, balance: bal };
     });
     const totalDue = calc.round2(events.reduce((s, e) => s + e.due, 0));
-    const totalPaid = calc.round2(calc.rentPayments(cps).reduce((s, p) => s + (Number(p.amount) || 0), 0));
+    const totalPaid = calc.round2(calc.rentPayments(cps).reduce((s, p) => s + (Number(p.amount) || 0), 0) + calc.openingAmount(contract));
     const totalOtherPaid = calc.round2(cps.filter((p) => !calc.isRentPayment(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0));
     res.json({
       tenant, unit, property,
@@ -743,7 +748,7 @@ app.get('/api/tenants-search', auth, async (req, res) => {
         const ps = paysByContract[c.id] || [];
         // «إجمالي ما سدده» في البحث = مدفوعات الإيجار فقط (موقف الإيجار)،
         // بينما عدد السندات يشمل كل السندات أياً كان مقابلها
-        totalPaid += calc.rentPayments(ps).reduce((s, p) => s + Number(p.amount || 0), 0);
+        totalPaid += calc.rentPayments(ps).reduce((s, p) => s + Number(p.amount || 0), 0) + calc.openingAmount(c);
         receipts += ps.length;
         arrears += calc.contractSummary(c, ps).arrears;
       }

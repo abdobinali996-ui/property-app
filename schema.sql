@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS contracts (
 );
 -- للقواعد الموجودة مسبقاً: إضافة عمود عدد الدفعات
 ALTER TABLE contracts ADD COLUMN IF NOT EXISTS installments_count INTEGER;
+-- الرصيد الافتتاحي: محصّل قبل استخدام البرنامج (يغطي أقدم الأقساط، ليس سند قبض)
+ALTER TABLE contracts ADD COLUMN IF NOT EXISTS opening_paid NUMERIC(14,2) NOT NULL DEFAULT 0;
 
 -- تسلسل أرقام سندات القبض
 CREATE SEQUENCE IF NOT EXISTS receipt_seq START 1;
