@@ -1108,6 +1108,16 @@ async function showLetter(contractId) {
         const row = await api('/api/letters', { method: 'POST', body: JSON.stringify(payload) });
         savedNote = `<p class="muted" style="font-size:12px">✅ حُفظ الخطاب برقم ${row.id} — تجده في تبويب «الخطابات».</p>`;
       }
+      // خطاب الزيادة يجدول الزيادة على العقد تلقائياً (تحديث 48 — بطلب عبده):
+      // الأقساط التي تبدأ من تاريخ السريان تُحسب بالمبلغ السنوي الجديد من
+      // نفسها، وأول سند قبض في الفترة الجديدة يطلع بالمبلغ الجديد جاهزاً
+      if (type === 'increase' && Number(newVal) > 0 && ddmmyyyyToIso(d.effDate)) {
+        try {
+          await api(`/api/contracts/${c.id}`, { method: 'PUT', body: JSON.stringify({ increase_new_annual: Number(newVal), increase_eff_date: ddmmyyyyToIso(d.effDate) }) });
+          savedNote += `<p class="muted" style="font-size:12px">📈 وتمت جدولة الزيادة على العقد تلقائياً: الأقساط التي تبدأ من ${esc(d.effDate)} هتتحسب بـ ${money(Number(newVal))} سنوياً.</p>`;
+          refreshCache();
+        } catch (_) {}
+      }
       lastSavedLetterKey = key;
     } catch (e) { savedNote = '<p class="error" style="font-size:12px">تعذّر حفظ الخطاب (ظهر لك للطباعة والإرسال فقط).</p>'; }
   }
@@ -1220,7 +1230,7 @@ async function viewContracts() {
       <div class="section-head"><h3>العقود</h3><button class="btn primary" onclick="contractForm()">+ إضافة عقد</button></div>
       ${CACHE.contracts.length ? `<div class="table-wrap"><table><tr><th>المستأجر</th><th>الوحدة</th><th>الإيجار</th><th>الفترة</th><th>المدفوع</th><th>المستحق</th><th>المتأخرات</th><th>الحالة</th><th></th></tr>
         ${CACHE.contracts.map((c) => `<tr><td><strong>${esc(c.tenant_name)}</strong></td><td>${esc(c.unit_name)} — ${esc(c.property_name)}</td>
-          <td>${money(c.rent_amount)} <span class="muted">(إجمالي العقد)</span><br><span class="muted">القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</span></td>
+          <td>${money(c.rent_amount)} <span class="muted">(إجمالي العقد)</span><br><span class="muted">القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</span>${c.increase ? `<br><span class="badge" style="background:#fdf6e3;color:#7a5b00;border:1px solid #e5cf8a">📈 زيادة ${money(c.increase.annual)} سنوياً من ${esc(fmtGregFull(c.increase.eff_date))}</span>` : ''}</td>
           <td>${esc(contractDateDisp(c, c.start_date))}<br><span class="muted">${c.end_date ? 'إلى ' + esc(contractDateDisp(c, c.end_date)) : 'مفتوح'}</span>${c.calendar === 'hijri' ? ' <span class="badge">هجري</span>' : ''}</td>
           <td class="money paid-green">${money(c.total_paid)}${Number(c.opening_paid) > 0 ? `<br><span class="muted" style="font-size:11px">منه افتتاحي: ${money(c.opening_paid)}</span>` : ''}</td><td>${money(c.total_due)}</td>
           <td class="${c.arrears > 0 ? 'arrears due-red' : ''}">${money(c.arrears)}</td>
@@ -1285,6 +1295,7 @@ function contractForm(id, prefill) {
     <p class="muted" id="ctHint" style="margin:-4px 0 10px"></p>
     <label>محصّل قبل استخدام البرنامج — رصيد افتتاحي (${CUR.label})<input name="opening_paid" type="number" step="0.01" min="0" value="${c.opening_paid ?? ''}" placeholder="0"></label>
     <p class="muted" style="margin:-4px 0 10px">للعقود التي بدأت قبل البرنامج: المبلغ الذي حصّلته فعلياً من المستأجر قبل البرنامج. يغطي أقدم الأقساط ويُلغي المتأخرات الوهمية، وهو ليس سند قبض ولا يدخل في محصلات الشهور.</p>
+    ${Number(c.increase_new_annual) > 0 && c.increase_eff_date ? `<div style="background:#fdf6e3;border:1px solid #e5cf8a;border-radius:8px;padding:8px 10px;margin:6px 0">📈 <strong>زيادة مجدولة على هذا العقد:</strong> ${money(c.increase_new_annual)} سنوياً — تسري تلقائياً على الأقساط التي تبدأ من ${esc(fmtGregFull(c.increase_eff_date))} (سُجّلت من خطاب الزيادة).<br><button type="button" class="btn small danger" id="ctClearInc" style="margin-top:6px">إلغاء الزيادة المجدولة</button></div>` : ''}
     <label>التأمين (${CUR.label})<input name="deposit" type="number" step="0.01" min="0" value="${c.deposit ?? 0}"></label>
     <label>الحالة<select name="status"><option value="active" ${c.status === 'active' ? 'selected' : ''}>سارٍ</option><option value="renewed" ${c.status === 'renewed' ? 'selected' : ''}>مُجدَّد</option><option value="ended" ${c.status === 'ended' ? 'selected' : ''}>منتهٍ</option><option value="vacated" ${c.status === 'vacated' ? 'selected' : ''}>خرج وإخلاء</option></select></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(c.notes || '')}</textarea></label>`,
@@ -1345,6 +1356,17 @@ function contractForm(id, prefill) {
     };
     unitSearchEl.addEventListener('input', refillUnits);
     tenantSearchEl.addEventListener('input', refillTenants);
+    // إلغاء الزيادة المجدولة (تحديث 48)
+    const clrInc = document.getElementById('ctClearInc');
+    if (clrInc) clrInc.addEventListener('click', async () => {
+      if (!confirm('إلغاء الزيادة المجدولة من هذا العقد؟ الأقساط هترجع للمبلغ الأصلي.')) return;
+      try {
+        await api(`/api/contracts/${id}`, { method: 'PUT', body: JSON.stringify({ increase_new_annual: null, increase_eff_date: null }) });
+        await refreshCache();
+        closeModal();
+        contractForm(id);
+      } catch (e) { alert(e.message); }
+    });
     // تقويم العقد (ميلادي/هجري): مزامنة الاتجاهين بين حقول التاريخ الميلادية
     // والهجرية حتى تعمل حسابات المدة وعدد الدفعات من القيم الميلادية دائماً
     const calSel = document.getElementById('ctCal');
@@ -1820,6 +1842,17 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     }));
     contractEl.addEventListener('change', fillInstallments);
     instEl.addEventListener('change', () => {
+      // شريحة «قيمة قسط واحد» تعكس مبلغ القسط المختار نفسه — ومعه الزيادة
+      // المجدولة إن كان القسط من فترة ما بعد سريانها (تحديث 48)
+      const c0 = pool.find((x) => x.id === Number(contractEl.value));
+      const ciEl = document.getElementById('chipInstallment');
+      if (c0 && ciEl) {
+        const k = Number(instEl.value);
+        const amts = Array.isArray(c0.installment_amounts) ? c0.installment_amounts : [];
+        const v = (k >= 1 && amts[k - 1] != null) ? amts[k - 1] : (c0.installment_amount ?? c0.rent_amount);
+        ciEl.textContent = `قيمة قسط واحد: ${money(v)}`;
+        ciEl.onclick = () => setPayAmount(v);
+      }
       if (periodTouched) return;
       const c = pool.find((x) => x.id === Number(contractEl.value));
       if (instEl.value) {

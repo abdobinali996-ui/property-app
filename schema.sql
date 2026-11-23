@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS contracts (
 ALTER TABLE contracts ADD COLUMN IF NOT EXISTS installments_count INTEGER;
 -- الرصيد الافتتاحي: محصّل قبل استخدام البرنامج (يغطي أقدم الأقساط، ليس سند قبض)
 ALTER TABLE contracts ADD COLUMN IF NOT EXISTS opening_paid NUMERIC(14,2) NOT NULL DEFAULT 0;
+-- زيادة مجدولة من خطاب زيادة: مبلغ سنوي جديد + تاريخ سريانه على الأقساط
+ALTER TABLE contracts ADD COLUMN IF NOT EXISTS increase_new_annual NUMERIC(14,2);
+ALTER TABLE contracts ADD COLUMN IF NOT EXISTS increase_eff_date DATE;
 
 -- تسلسل أرقام سندات القبض
 CREATE SEQUENCE IF NOT EXISTS receipt_seq START 1;

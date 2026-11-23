@@ -190,23 +190,47 @@ function installmentsCount(contract) {
   return CYCLE_YEAR_COUNT[contract && contract.cycle] || 12;
 }
 
+// زيادة مجدولة (تحديث 48 — من خطاب زيادة القيمة الإيجارية): مبلغ سنوي جديد
+// يسري تلقائياً على الأقساط التي تبدأ فترتها من تاريخ السريان فصاعداً
+function scheduledIncrease(contract) {
+  const amt = Number(contract && contract.increase_new_annual) || 0;
+  const eff = contract && contract.increase_eff_date ? fmtDate(contract.increase_eff_date) : '';
+  return amt > 0 && eff ? { annual: amt, eff_date: eff } : null;
+}
+
 // مبالغ الأقساط: قسمة إجمالي الإيجار بالتساوي مع امتصاص الدفعة الأخيرة لفرق
-// التقريب، بحيث يكون مجموع المبالغ مساوياً للإجمالي تماماً
+// التقريب، بحيث يكون مجموع المبالغ مساوياً للإجمالي تماماً. وعند وجود زيادة
+// مجدولة: الأقساط التي تبدأ من تاريخ سريانها تُحسب من المبلغ السنوي الجديد
 function installmentAmounts(contract) {
   const total = Number(contract.rent_amount) || 0;
   const n = installmentsCount(contract);
   const base = round2(total / n);
+  const inc = scheduledIncrease(contract);
+  if (!inc) {
+    const amounts = [];
+    for (let i = 0; i < n - 1; i++) amounts.push(base);
+    amounts.push(round2(total - base * (n - 1)));
+    return amounts;
+  }
+  const step = CYCLE_MONTHS[contract.cycle] || 1;
+  const start = toDate(contract.start_date);
+  const newPer = round2((inc.annual * step) / 12);
   const amounts = [];
-  for (let i = 0; i < n - 1; i++) amounts.push(base);
-  amounts.push(round2(total - base * (n - 1)));
+  for (let i = 0; i < n; i++) {
+    const s = start ? stepMonths(contract, start, i * step) : null;
+    amounts.push(s && fmtDate(s) >= inc.eff_date ? newPer : base);
+  }
   return amounts;
 }
 
 // ملخص عقد: إجمالي المستحق حتى اليوم، المدفوع، المتأخرات، المتبقي من العقد
 function contractSummary(contract, payments, asOf) {
   const at = asOf ? toDate(asOf) : today();
-  const total = Number(contract.rent_amount) || 0;
   const amounts = installmentAmounts(contract);
+  // مع زيادة مجدولة يصبح إجمالي العقد الفعلي = مجموع الأقساط بمبالغها المختلفة
+  const total = scheduledIncrease(contract)
+    ? round2(amounts.reduce((s, a) => s + a, 0))
+    : (Number(contract.rent_amount) || 0);
   const n = amounts.length;
   const startedCount = periodStarts(contract, at).length;
   const dueCount = Math.min(startedCount, n);
@@ -225,6 +249,7 @@ function contractSummary(contract, payments, asOf) {
     total_due: totalDue,
     total_paid: totalPaid,
     opening_paid: openingAmount(contract),
+    increase: scheduledIncrease(contract),
     other_paid: otherPaid,
     arrears,
     contract_total: total,
@@ -449,6 +474,6 @@ module.exports = {
   installmentSchedule, nextUnpaidInstallment, installmentBalance,
   installmentCoverage, installmentBalanceForPayment, installmentPeriod,
   paymentPurpose, isRentPayment, isOfficePayment, rentPayments, OFFICE_PURPOSE,
-  openingAmount, openingPayment,
+  openingAmount, openingPayment, scheduledIncrease,
   normalizeOwnerName,
 };
