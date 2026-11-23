@@ -1290,7 +1290,9 @@ function contractForm(id, prefill) {
       </span></label>
     </div>
     <label>إجمالي إيجار العقد (لكامل المدة) (${CUR.label}) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
-    <label>دورة السداد<select name="cycle">${Object.entries(CYCLE_LABELS).map(([v, l]) => `<option value="${v}" ${c.cycle === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label>دورة السداد — المستأجر يدفع كل قد إيه؟</label>
+    <div class="chips" id="ctCycleChips">${[['monthly', 'شهري'], ['quarterly', 'ربع سنوي'], ['semiannual', 'كل 6 شهور'], ['annual', 'سنوي']].map(([v, l]) => `<button type="button" class="chip cycle-chip${(c.cycle || 'monthly') === v ? ' active' : ''}" data-cycle="${v}">${l}</button>`).join('')}</div>
+    <input type="hidden" name="cycle" value="${c.cycle || 'monthly'}">
     <label>عدد الدفعات (الأقساط)<input name="installments_count" type="number" step="1" min="1" value="${c.installments_count ?? ''}" placeholder="يُحسب تلقائياً من المدة"></label>
     <p class="muted" id="ctHint" style="margin:-4px 0 10px"></p>
     <label>محصّل قبل استخدام البرنامج — رصيد افتتاحي (${CUR.label})<input name="opening_paid" type="number" step="0.01" min="0" value="${c.opening_paid ?? ''}" placeholder="0"></label>
@@ -1415,6 +1417,12 @@ function contractForm(id, prefill) {
     };
     const onDates = () => { if (!countTouched) countEl.value = autoCount(); refreshHint(); };
     [startEl, endEl, cycleEl].forEach((el) => el.addEventListener('change', onDates));
+    // أزرار دورة السداد (تحديث 49): الضغط على زر يفعّله ويحدّث عدد الدفعات والتلميح
+    form.querySelectorAll('.cycle-chip').forEach((btn) => btn.addEventListener('click', () => {
+      form.querySelectorAll('.cycle-chip').forEach((b) => b.classList.toggle('active', b === btn));
+      cycleEl.value = btn.dataset.cycle;
+      cycleEl.dispatchEvent(new Event('change'));
+    }));
     calSel.addEventListener('change', onDates);
     rentEl.addEventListener('input', refreshHint);
     countEl.addEventListener('input', () => { countTouched = true; refreshHint(); });
