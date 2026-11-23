@@ -1861,12 +1861,15 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
         ciEl.textContent = `قيمة قسط واحد: ${money(v)}`;
         ciEl.onclick = () => setPayAmount(v);
       }
-      if (periodTouched) return;
+      // اختيار رقم القسط يفرض فترة ذلك القسط من العقد دائماً (تحديث 50 — بطلب
+      // عبده: «لما احط رقم القسط خلي التاريخ يبقى تلقائي بناء على العقد») —
+      // حتى لو عدّل الفترة يدوياً قبل الاختيار؛ تعديله اليدوي بعد الاختيار
+      // يبقى كما هو ولا يُستبدل إلا باختيار قسط آخر
       const c = pool.find((x) => x.id === Number(contractEl.value));
       if (instEl.value) {
         const per = installmentPeriodClient(c, Number(instEl.value));
         if (per) { fromEl.value = per.period_from; toEl.value = per.period_to; toTouched = false; if (calEl.value === 'hijri') gregToHijriFill(); }
-      } else applyDefaultPeriod();
+      } else if (!periodTouched) applyDefaultPeriod();
     });
     if (purposeEl) purposeEl.addEventListener('change', syncPurpose);
     fillInstallments();
