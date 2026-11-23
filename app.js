@@ -1225,11 +1225,25 @@ async function del(table, id, label) {
 // ---------------- العقود ----------------
 async function viewContracts() {
   await refreshCache();
+  const tenantById = Object.fromEntries(CACHE.tenants.map((t) => [t.id, t]));
+  const propById = Object.fromEntries(CACHE.properties.map((p) => [p.id, p]));
   main().innerHTML = `
     <div class="section">
       <div class="section-head"><h3>العقود</h3><button class="btn primary" onclick="contractForm()">+ إضافة عقد</button></div>
-      ${CACHE.contracts.length ? `<div class="table-wrap"><table><tr><th>المستأجر</th><th>الوحدة</th><th>الإيجار</th><th>الفترة</th><th>المدفوع</th><th>المستحق</th><th>المتأخرات</th><th>الحالة</th><th></th></tr>
-        ${CACHE.contracts.map((c) => `<tr><td><strong>${esc(c.tenant_name)}</strong></td><td>${esc(c.unit_name)} — ${esc(c.property_name)}</td>
+      <div class="search-row"><input id="ctFilter" placeholder="ابحث باسم المستأجر أو رقم الجوال أو رقم العقد أو الوحدة أو العقار…"></div>
+      <p class="muted" id="ctCount" style="margin:2px 0 8px"></p>
+      <div id="ctTable"></div>
+    </div>`;
+  // بحث فوري في قائمة العقود (تحديث 54 — عبده: ممكن يبقى عندي أكتر من ألف عقد)
+  // يطابق: اسم المستأجر، جواله، رقم عقده، الوحدة، العقار، المالك — مع توحيد
+  // الأرقام العربية (٠١٢٣) والإنجليزية حتى يعمل البحث برقم الجوال بأي شكل
+  const norm = (s) => String(s || '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+  const draw = (list) => {
+    document.getElementById('ctCount').textContent = CACHE.contracts.length ? `عرض ${list.length} من ${CACHE.contracts.length} عقد` : '';
+    document.getElementById('ctTable').innerHTML = !CACHE.contracts.length
+      ? '<p class="muted">لا توجد عقود بعد.</p>'
+      : (list.length
+        ? `<div class="table-wrap"><table><tr><th>المستأجر</th><th>الوحدة</th><th>الإيجار</th><th>الفترة</th><th>المدفوع</th><th>المستحق</th><th>المتأخرات</th><th>الحالة</th><th></th></tr>${list.map((c) => `<tr><td><strong>${esc(c.tenant_name)}</strong></td><td>${esc(c.unit_name)} — ${esc(c.property_name)}</td>
           <td>${money(c.rent_amount)} <span class="muted">(إجمالي العقد)</span><br><span class="muted">القسط: ${money(c.installment_amount)} × ${c.installments_total} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</span>${c.increase ? `<br><span class="badge" style="background:#fdf6e3;color:#7a5b00;border:1px solid #e5cf8a">📈 زيادة ${money(c.increase.annual)} سنوياً من ${esc(fmtGregFull(c.increase.eff_date))}</span>` : ''}</td>
           <td>${esc(contractDateDisp(c, c.start_date))}<br><span class="muted">${c.end_date ? 'إلى ' + esc(contractDateDisp(c, c.end_date)) : 'مفتوح'}</span>${c.calendar === 'hijri' ? ' <span class="badge">هجري</span>' : ''}</td>
           <td class="money paid-green">${money(c.total_paid)}${Number(c.opening_paid) > 0 ? `<br><span class="muted" style="font-size:11px">منه افتتاحي: ${money(c.opening_paid)}</span>` : ''}</td><td>${money(c.total_due)}</td>
@@ -1243,8 +1257,18 @@ async function viewContracts() {
           <button class="btn small" onclick="showAttachments('contract', ${c.id}, 'العقد')">📎</button>
           <button class="btn small" onclick="contractForm(${c.id})">تعديل</button>
           ${delBtn('contracts', c.id, `عقد ${esc(c.tenant_name)}`)}</td></tr>`).join('')}</table></div>`
-      : '<p class="muted">لا توجد عقود بعد.</p>'}
-    </div>`;
+        : '<p class="muted">لا توجد عقود مطابقة للبحث.</p>');
+  };
+  draw(CACHE.contracts);
+  document.getElementById('ctFilter').addEventListener('input', (e) => {
+    const q = norm(e.target.value.trim());
+    if (!q) return draw(CACHE.contracts);
+    draw(CACHE.contracts.filter((c) => {
+      const t = tenantById[c.tenant_id] || {};
+      const p = propById[c.property_id] || {};
+      return norm(`${c.tenant_name || ''} ${t.phone || ''} ${t.contract_no || ''} ${c.unit_name || ''} ${c.property_name || ''} ${p.owner_name || ''}`).includes(q);
+    }));
+  });
 }
 // حساب عدد الدفعات من التواريخ والدورة في نموذج العقد (نفس منطق الخادم)
 const CYCLE_MONTHS_F = { monthly: 1, quarterly: 3, semiannual: 6, annual: 12 };
