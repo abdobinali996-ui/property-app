@@ -858,35 +858,48 @@ const LETTER_SIG = { ar: 'إدارة المكتب', en: 'The Management', ur: '�
 const LETTER_SIGN_LABEL = { ar: 'التوقيع', en: 'Signature', ur: 'دستخط', bn: 'স্বাক্ষর' };
 const LETTER_STAMP_LABEL = { ar: 'الختم', en: 'Stamp', ur: 'مہر', bn: 'সিল' };
 const LETTER_TYPE_LABELS = { renewal: 'نهاية إيجار وزيادة عند التجديد', increase: 'زيادة القيمة الإيجارية', eviction: 'إخلاء الوحدة' };
+// تاريخ الخطاب مزدوجاً: هجري وميلادي معاً (يُدخل بأي تقويم ويُطبع بالاثنين)
+function letterDualDate(ddmmyyyy, lang) {
+  const iso = ddmmyyyyToIso(ddmmyyyy);
+  if (!iso) return ddmmyyyy || '';
+  const hp = isoToHijriParts(iso); const h = `${hp.d}/${hp.m}/${hp.y}`;
+  const g = fmtGregFull(iso);
+  if (lang === 'en') return `${g} (corresponding to ${h} AH)`;
+  if (lang === 'bn') return `${g} (${h} হিজরি)`;
+  return `${h} هـ الموافق ${g} م`;
+}
 function letterText(lang, type, d) {
   const reason = (LETTER_REASONS[d.reasonKey] || LETTER_REASONS.other)[lang];
+  const endDate = letterDualDate(d.endDate, lang);
+  const effDate = letterDualDate(d.effDate, lang);
+  const vacateDate = letterDualDate(d.vacateDate, lang);
   if (type === 'renewal') {
     // قالب عبده: نهاية الإيجار + زيادة سنوية عند التجديد + عقد إلكتروني + ختم وتوقيع
     if (lang === 'en') return { title: 'Notice of Lease End and Renewal Terms', stampRow: true, paras: [
       `Dear Mr./Ms. ${d.tenantName},`,
       `Tenant of unit: ${d.unitName} — at property: ${d.propertyName} — owned by: ${d.ownerName}.`,
-      `Please be informed that your lease ends on ${d.endDate}. Kindly note that upon renewal the annual rent will be increased to ${d.newAmount} ${CUR.code} per year, and a new electronic contract will be issued.`,
+      `Please be informed that your lease ends on ${endDate}. Kindly note that upon renewal the annual rent will be increased to ${d.newAmount} ${CUR.code} per year, and a new electronic contract will be issued.`,
       'Please let us know whether you agree to renew on these terms, or vacate the unit by the stated date. Thank you for your cooperation.',
       `With greetings from ${d.company}`,
     ] };
     if (lang === 'ur') return { title: 'کرایہ ختم ہونے اور تجدید کی اطلاع', stampRow: true, paras: [
       `محترم ${d.tenantName} صاحب/صاحبہ،`,
       `یونٹ (${d.unitName})، عمارت (${d.propertyName}) کے کرایہ دار — جس کے مالک ${d.ownerName} ہیں۔`,
-      `آپ کو مطلع کیا جاتا ہے کہ آپ کا کرایہ ${d.endDate} کو ختم ہو رہا ہے۔ براہ کرم نوٹ فرمائیں کہ تجدید کی صورت میں کرایہ بڑھا کر سالانہ ${d.newAmount} ${CUR.label} کر دیا جائے گا، اور نیا الیکٹرانک عقد لکھا جائے گا۔`,
+      `آپ کو مطلع کیا جاتا ہے کہ آپ کا کرایہ ${endDate} کو ختم ہو رہا ہے۔ براہ کرم نوٹ فرمائیں کہ تجدید کی صورت میں کرایہ بڑھا کر سالانہ ${d.newAmount} ${CUR.label} کر دیا جائے گا، اور نیا الیکٹرانک عقد لکھا جائے گا۔`,
       'براہ کرم ان شرائط پر تجدید سے اتفاق یا مقررہ تاریخ تک یونٹ خالی کرنے سے متعلق آگاہ فرمائیں۔ آپ کے تعاون کا شکریہ۔',
       `${d.company} کی جانب سے نیک تمناؤں کے ساتھ`,
     ] };
     if (lang === 'bn') return { title: 'ইজারা শেষ ও নবায়নের নোটিশ', stampRow: true, paras: [
       `প্রিয় জনাব/জনাবা ${d.tenantName},`,
       `ইউনিট: ${d.unitName} — সম্পত্তি: ${d.propertyName} — যার মালিক: ${d.ownerName} — এর ভাড়াটিয়া।`,
-      `আপনাকে জানানো যাচ্ছে যে, আপনার ইজারা ${d.endDate} তারিখে শেষ হচ্ছে। অনুগ্রহ করে লক্ষ্য করুন, নবায়নের ক্ষেত্রে ভাড়া বাড়িয়ে বার্ষিক ${d.newAmount} ${CUR.label} করা হবে এবং একটি নতুন ইলেকট্রনিক চুক্তি করা হবে।`,
+      `আপনাকে জানানো যাচ্ছে যে, আপনার ইজারা ${endDate} তারিখে শেষ হচ্ছে। অনুগ্রহ করে লক্ষ্য করুন, নবায়নের ক্ষেত্রে ভাড়া বাড়িয়ে বার্ষিক ${d.newAmount} ${CUR.label} করা হবে এবং একটি নতুন ইলেকট্রনিক চুক্তি করা হবে।`,
       'অনুগ্রহ করে এই শর্তে নবায়নে আপনার সম্মতি জানান অথবা নির্ধারিত তারিখের মধ্যে ইউনিটটি খালি করুন। আপনার সহযোগিতার জন্য ধন্যবাদ।',
       `${d.company} এর পক্ষ থেকে শুভেচ্ছাসহ`,
     ] };
     return { title: 'خطاب بخصوص نهاية الإيجار وتجديده', stampRow: true, paras: [
       `السيد/ السيدة: ${d.tenantName} — المحترم،`,
       `مستأجر وحدة: ${d.unitName} — بالعقار: ${d.propertyName} — لمالكها: ${d.ownerName}.`,
-      `نحيطكم علماً بنهاية الإيجار بتاريخ ${d.endDate}، ويرجى العلم بأنه سيتم زيادة الإيجار إلى ${d.newAmount} ${CUR.label} سنوياً عند التجديد، مع كتابة عقد إلكتروني جديد.`,
+      `نحيطكم علماً بنهاية الإيجار بتاريخ ${endDate}، ويرجى العلم بأنه سيتم زيادة الإيجار إلى ${d.newAmount} ${CUR.label} سنوياً عند التجديد، مع كتابة عقد إلكتروني جديد.`,
       'نرجو التكرم بإفادتنا بموافقتكم على التجديد بالشروط المذكورة أعلاه، أو إخلاء الوحدة في الموعد المحدد، شاكرين لكم حسن تعاونكم.',
       `مع تحيات ${d.company}`,
     ] };
@@ -895,13 +908,13 @@ function letterText(lang, type, d) {
     if (type === 'increase') return { title: 'Notice of Rent Increase', paras: [
       `Dear Mr./Ms. ${d.tenantName},`,
       `Tenant of unit (${d.unitName}) at property (${d.propertyName}).`,
-      `Please be informed that the annual rent for the above unit will become ${d.newAmount} ${CUR.code} per year instead of ${d.oldAmount} ${CUR.code}, effective ${d.effDate}.`,
+      `Please be informed that the annual rent for the above unit will become ${d.newAmount} ${CUR.code} per year instead of ${d.oldAmount} ${CUR.code}, effective ${effDate}.`,
       'Please contact the office to complete the renewal procedures. Thank you for your cooperation.',
     ] };
     return { title: 'Notice of Eviction', paras: [
       `Dear Mr./Ms. ${d.tenantName},`,
       `Tenant of unit (${d.unitName}) at property (${d.propertyName}).`,
-      `Please be informed that you are required to vacate the above unit no later than ${d.vacateDate}, for the following reason: ${reason}.`,
+      `Please be informed that you are required to vacate the above unit no later than ${vacateDate}, for the following reason: ${reason}.`,
       'Please contact the office to arrange the handover of the unit and settle any outstanding amounts. Thank you for your cooperation.',
     ] };
   }
@@ -909,13 +922,13 @@ function letterText(lang, type, d) {
     if (type === 'increase') return { title: 'کرایہ میں اضافے کی اطلاع', paras: [
       `محترم ${d.tenantName} صاحب/صاحبہ،`,
       `یونٹ (${d.unitName})، عمارت (${d.propertyName}) کے کرایہ دار۔`,
-      `آپ کو مطلع کیا جاتا ہے کہ مذکورہ یونٹ کا سالانہ کرایہ ${d.oldAmount} ${CUR.label} سے بڑھا کر ${d.newAmount} ${CUR.label} سالانہ کر دیا گیا ہے، جو ${d.effDate} سے نافذ ہوگا۔`,
+      `آپ کو مطلع کیا جاتا ہے کہ مذکورہ یونٹ کا سالانہ کرایہ ${d.oldAmount} ${CUR.label} سے بڑھا کر ${d.newAmount} ${CUR.label} سالانہ کر دیا گیا ہے، جو ${effDate} سے نافذ ہوگا۔`,
       'براہ کرم تجدید کے امور مکمل کرنے کے لیے دفتر سے رابطہ فرمائیں۔ آپ کے تعاون کا شکریہ۔',
     ] };
     return { title: 'یونٹ خالی کرنے کی اطلاع', paras: [
       `محترم ${d.tenantName} صاحب/صاحبہ،`,
       `یونٹ (${d.unitName})، عمارت (${d.propertyName}) کے کرایہ دار۔`,
-      `آپ کو مطلع کیا جاتا ہے کہ درج ذیل وجہ کی بنا پر آپ کو ${d.vacateDate} تک یونٹ خالی کرنا ہوگا: ${reason}۔`,
+      `آپ کو مطلع کیا جاتا ہے کہ درج ذیل وجہ کی بنا پر آپ کو ${vacateDate} تک یونٹ خالی کرنا ہوگا: ${reason}۔`,
       'براہ کرم یونٹ کی حوالگی اور واجبات کی ادائیگی کے لیے دفتر سے رابطہ فرمائیں۔ آپ کے تعاون کا شکریہ۔',
     ] };
   }
@@ -923,30 +936,39 @@ function letterText(lang, type, d) {
     if (type === 'increase') return { title: 'ভাড়া বৃদ্ধির নোটিশ', paras: [
       `প্রিয় জনাব/জনাবা ${d.tenantName},`,
       `ইউনিট (${d.unitName}), সম্পত্তি (${d.propertyName}) এর ভাড়াটিয়া।`,
-      `আপনাকে জানানো যাচ্ছে যে, উক্ত ইউনিটের বার্ষিক ভাড়া ${d.oldAmount} ${CUR.label} থেকে বাড়িয়ে ${d.newAmount} ${CUR.label} করা হয়েছে, যা ${d.effDate} থেকে কার্যকর হবে।`,
+      `আপনাকে জানানো যাচ্ছে যে, উক্ত ইউনিটের বার্ষিক ভাড়া ${d.oldAmount} ${CUR.label} থেকে বাড়িয়ে ${d.newAmount} ${CUR.label} করা হয়েছে, যা ${effDate} থেকে কার্যকর হবে।`,
       'নবায়নের কাজ সম্পন্ন করতে অনুগ্রহ করে অফিসে যোগাযোগ করুন। আপনার সহযোগিতার জন্য ধন্যবাদ।',
     ] };
     return { title: 'ইউনিট খালি করার নোটিশ', paras: [
       `প্রিয় জনাব/জনাবা ${d.tenantName},`,
       `ইউনিট (${d.unitName}), সম্পত্তি (${d.propertyName}) এর ভাড়াটিয়া।`,
-      `আপনাকে জানানো যাচ্ছে যে, নিম্নলিখিত কারণে আপনাকে ${d.vacateDate} তারিখের মধ্যে ইউনিটটি খালি করতে হবে: ${reason}।`,
+      `আপনাকে জানানো যাচ্ছে যে, নিম্নলিখিত কারণে আপনাকে ${vacateDate} তারিখের মধ্যে ইউনিটটি খালি করতে হবে: ${reason}।`,
       'ইউনিট হস্তান্তর ও বকেয়া পরিশোধের জন্য অনুগ্রহ করে অফিসে যোগাযোগ করুন। আপনার সহযোগিতার জন্য ধন্যবাদ।',
     ] };
   }
   if (type === 'increase') return { title: 'خطاب زيادة القيمة الإيجارية', paras: [
     `السيد/ السيدة: ${d.tenantName} — المحترم،`,
     `مستأجر وحدة: ${d.unitName} — بالعقار: ${d.propertyName}.`,
-    `نفيدكم بأنه تقرر تعديل القيمة الإيجارية السنوية للوحدة المذكورة أعلاه لتصبح ${d.newAmount} ${CUR.label} سنوياً بدلاً من ${d.oldAmount} ${CUR.label}، وذلك اعتباراً من تاريخ ${d.effDate}.`,
+    `نفيدكم بأنه تقرر تعديل القيمة الإيجارية السنوية للوحدة المذكورة أعلاه لتصبح ${d.newAmount} ${CUR.label} سنوياً بدلاً من ${d.oldAmount} ${CUR.label}، وذلك اعتباراً من تاريخ ${effDate}.`,
     'نرجو التكرم بمراجعة المكتب لإتمام إجراءات التجديد، شاكرين لكم حسن تعاونكم.',
   ] };
   return { title: 'خطاب إخلاء وحدة سكنية', paras: [
     `السيد/ السيدة: ${d.tenantName} — المحترم،`,
     `مستأجر وحدة: ${d.unitName} — بالعقار: ${d.propertyName}.`,
-    `نفيدكم بضرورة إخلاء الوحدة المذكورة أعلاه في موعد أقصاه ${d.vacateDate}، وذلك بسبب: ${reason}.`,
+    `نفيدكم بضرورة إخلاء الوحدة المذكورة أعلاه في موعد أقصاه ${vacateDate}، وذلك بسبب: ${reason}.`,
     'نرجو التكرم بالتواصل مع المكتب لترتيب استلام الوحدة وتسوية أي مستحقات قائمة، شاكرين لكم حسن تعاونكم.',
   ] };
 }
 function ddmmyyyyToIso(s) { const m = String(s || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : ''; }
+// قراءة تاريخ من نموذج الخطاب حسب تقويم الإدخال المختار — يعيد ISO ميلادياً دائماً
+function ltDateIso(dateId, p) {
+  const cal = document.getElementById('ltCal');
+  if (cal && cal.value === 'hijri') {
+    return hijriToIso(document.getElementById(p + 'Hy').value, document.getElementById(p + 'Hm').value, document.getElementById(p + 'Hd').value) || '';
+  }
+  const el = document.getElementById(dateId);
+  return el ? el.value : '';
+}
 function unformatNum(s) { return String(s || '').replace(/[^\d.]/g, ''); }
 let editingLetterId = null;
 function letterForm(contractId, editRow) {
@@ -968,16 +990,21 @@ function letterForm(contractId, editRow) {
       <option value="increase"${sel('increase')}>زيادة القيمة الإيجارية</option>
       <option value="eviction"${sel('eviction')}>إخلاء الوحدة</option>
     </select></label>
+    <label>تقويم إدخال التواريخ<select id="ltCal">
+      <option value="gregorian" selected>ميلادي</option>
+      <option value="hijri">هجري</option>
+    </select></label>
+    <p class="muted" style="margin:-4px 0 10px">تقدر تدخل التاريخ هجري أو ميلادي — والخطاب بيطبع التاريخ بالتقويمين معاً دائماً.</p>
     <div id="ltRenewal"${disp('renewal')}>
-      <label>تاريخ نهاية الإيجار<input id="ltEnd" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.endDate) : (c.end_date || today))}"></label>
+      <label>تاريخ نهاية الإيجار<input id="ltEnd" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.endDate) : (c.end_date || today))}"><span id="ltEndH" style="display:none;gap:4px;align-items:center"><input id="ltEndHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltEndHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltEndHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
       <label>قيمة الإيجار السنوية الجديدة (${esc(CUR.label)})<input id="ltNewR" type="number" min="0" step="any" placeholder="مثال: 120000" value="${esc(editRow ? unformatNum(ed.newAmount) : '')}"></label>
     </div>
     <div id="ltIncrease"${disp('increase')}>
       <label>قيمة الإيجار السنوية الجديدة (${esc(CUR.label)})<input id="ltNew" type="number" min="0" step="any" placeholder="مثال: 120000" value="${esc(editRow ? unformatNum(ed.newAmount) : '')}"></label>
-      <label>اعتباراً من تاريخ<input id="ltFrom" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.effDate) : today)}"></label>
+      <label>اعتباراً من تاريخ<input id="ltFrom" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.effDate) : today)}"><span id="ltFromH" style="display:none;gap:4px;align-items:center"><input id="ltFromHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltFromHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltFromHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
     </div>
     <div id="ltEviction"${disp('eviction')}>
-      <label>تاريخ الإخلاء (آخر موعد)<input id="ltDate" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.vacateDate) : (c.end_date || addMonthsStr(today, 1)))}"></label>
+      <label>تاريخ الإخلاء (آخر موعد)<input id="ltDate" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.vacateDate) : (c.end_date || addMonthsStr(today, 1)))}"><span id="ltDateH" style="display:none;gap:4px;align-items:center"><input id="ltDateHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltDateHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltDateHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
       <label>سبب الإخلاء<select id="ltReason">
         ${Object.entries(LETTER_REASONS).map(([k, v]) => `<option value="${k}"${editRow && ed.reasonKey === k ? ' selected' : ''}>${esc(v.ar)}</option>`).join('')}
       </select></label>
@@ -997,6 +1024,19 @@ function letterForm(contractId, editRow) {
     $('#ltRenewal').classList.toggle('hidden', v !== 'renewal');
     $('#ltIncrease').classList.toggle('hidden', v !== 'increase');
     $('#ltEviction').classList.toggle('hidden', v !== 'eviction');
+  });
+  // تقويم إدخال التواريخ: التبديل بين الميلادي والهجري مع مزامنة القيم بينهما
+  const ltPairs = [['ltEnd', 'ltEnd'], ['ltFrom', 'ltFrom'], ['ltDate', 'ltDate']];
+  const ltSyncH = (dateId, p) => { const iso = document.getElementById(dateId).value; if (!iso) return; const hp = isoToHijriParts(iso); document.getElementById(p + 'Hd').value = hp.d; document.getElementById(p + 'Hm').value = hp.m; document.getElementById(p + 'Hy').value = hp.y; };
+  const ltSyncG = (dateId, p) => { const iso = hijriToIso(document.getElementById(p + 'Hy').value, document.getElementById(p + 'Hm').value, document.getElementById(p + 'Hd').value); if (iso) document.getElementById(dateId).value = iso; };
+  $('#ltCal').addEventListener('change', (e) => {
+    const hijri = e.target.value === 'hijri';
+    for (const [dateId, p] of ltPairs) {
+      const inp = document.getElementById(dateId), span = document.getElementById(p + 'H');
+      if (!inp || !span) continue;
+      if (hijri) { ltSyncH(dateId, p); inp.style.display = 'none'; span.style.display = 'inline-flex'; }
+      else { ltSyncG(dateId, p); span.style.display = 'none'; inp.style.display = ''; }
+    }
   });
 }
 // تجميع مستند الخطاب (HTML) من بياناته — للخطاب الجديد والمحفوظ معاً
@@ -1048,9 +1088,9 @@ async function showLetter(contractId) {
     tenantName: c.tenant_name, unitName: c.unit_name, propertyName: c.property_name,
     ownerName: prop.owner_name || '', company: s.company_name || 'سليمان الحصين للعقارات',
     cycle: c.cycle, oldAmount: fmtN(c.rent_amount), newAmount: fmtN(newVal),
-    endDate: fmtGregFull($('#ltEnd') ? $('#ltEnd').value : ''),
-    effDate: fmtGregFull($('#ltFrom') ? $('#ltFrom').value : ''),
-    vacateDate: fmtGregFull($('#ltDate') ? $('#ltDate').value : ''),
+    endDate: fmtGregFull(ltDateIso('ltEnd', 'ltEnd')),
+    effDate: fmtGregFull(ltDateIso('ltFrom', 'ltFrom')),
+    vacateDate: fmtGregFull(ltDateIso('ltDate', 'ltDate')),
     reasonKey: $('#ltReason') ? $('#ltReason').value : 'other',
   };
   const doc = renderLetterDoc(type, lang2, d, s);
