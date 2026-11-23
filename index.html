@@ -77,6 +77,18 @@
 <!-- تنبيه التذكير بالذكر -->
 <div id="dhikrToast" class="dhikr-toast hidden" title="اضغط للإخفاء"></div>
 
+<!-- معاينة الطباعة -->
+<div id="printPreview" class="print-preview hidden">
+  <div class="print-preview-bar">
+    <strong>معاينة الطباعة</strong>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary" onclick="printNowFromPreview()">🖨️ طباعة الآن</button>
+      <button class="btn" onclick="closePrintPreview()">إغلاق</button>
+    </div>
+  </div>
+  <div id="printPreviewPage" class="print-preview-page"></div>
+</div>
+
 <!-- منطقة الطباعة -->
 <div id="printArea"></div>
 

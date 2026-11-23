@@ -76,19 +76,26 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
 .chip { border: 1px solid var(--teal2); color: var(--teal); background: #eef7f8; border-radius: 16px; padding: 5px 12px; font-size: 13px; }
 
+/* معاينة الطباعة (تحديث 40) */
+.print-preview { position: fixed; inset: 0; z-index: 80; background: rgba(10,30,34,.72); overflow-y: auto; padding: 14px 8px 30px; }
+.print-preview-bar { max-width: 820px; margin: 0 auto 12px; background: #fff; border-radius: 10px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.print-preview-page { background: #fff; max-width: 820px; margin: 0 auto; padding: 18px 14px; border-radius: 4px; box-shadow: 0 10px 34px rgba(0,0,0,.4); }
+
 /* الطباعة */
 #printArea { display: none; }
 @page { size: A4; margin: 7mm; }
 @media print {
-  body * { visibility: hidden; }
-  #printArea { display: block; position: absolute; inset: 0; padding: 0; }
-  #printArea * { visibility: visible; }
+  /* إصلاح الورقة الفاضية (تحديث 40): إخفاء واجهة التطبيق بـ display:none بدل
+     visibility، حتى لا تُحجز صفحات فارغة بارتفاع صفحة التطبيق الطويلة */
+  #app, #loginScreen, #modalBackdrop, #dhikrToast, #printPreview { display: none !important; }
+  html, body { height: auto !important; }
+  #printArea { display: block; position: static; padding: 0; }
   /* السند في ورقة واحدة: ضغط مسافات وخطوط نسخة الطباعة فقط (الشاشة كما هي) */
-  .receipt-doc { padding: 8px 14px; border-width: 1.5px; page-break-inside: avoid; }
-  .receipt-doc .company-header { padding-bottom: 6px; margin-bottom: 8px; }
+  .receipt-doc { padding: 6px 12px; border-width: 1.5px; page-break-inside: avoid; }
+  .receipt-doc .company-header { padding-bottom: 4px; margin-bottom: 6px; }
   .receipt-doc .company-header div { line-height: 1.45; }
   .receipt-doc .company-header .company-name { font-size: 17px; }
-  .receipt-doc .company-header .company-logo { max-height: 52px; margin-bottom: 4px; }
+  .receipt-doc .company-header .company-logo { max-height: 68px; margin-bottom: 4px; }
   .receipt-doc .doc-stamp { margin: 4px auto 6px; padding: 3px 8px; font-size: 12.5px; }
   .receipt-doc h2 { font-size: 19px; }
   .receipt-doc .r-no { margin-bottom: 8px; font-size: 13px; }
@@ -103,7 +110,7 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 .company-header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 14px; }
 .company-header div { font-size: 13px; color: #444; line-height: 1.7; }
 .company-header .company-name { font-size: 20px; font-weight: 800; color: #111; }
-.company-header .company-logo { display: block; margin: 0 auto 8px; max-height: 100px; max-width: 340px; object-fit: contain; }
+.company-header .company-logo { display: block; margin: 0 auto 8px; max-height: 132px; max-width: 380px; object-fit: contain; }
 .logo-preview { max-height: 88px; max-width: 300px; object-fit: contain; border: 1px solid var(--border); border-radius: 8px; padding: 4px; background: #fff; }
 .receipt-doc { border: 2px solid #333; padding: 22px; max-width: 720px; margin: 0 auto; direction: rtl; }
 .receipt-doc h2 { text-align: center; margin: 0 0 4px; }

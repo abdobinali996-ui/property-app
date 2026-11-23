@@ -157,17 +157,17 @@ function isoToHijriParts(iso) {
   const dt = isoToLocalDate(iso);
   return dt ? gregToHijriParts(dt) : null;
 }
-// صياغة هجرية كاملة بأسماء الشهور العربية: «١١ جمادى الآخرة ١٤٤٨ هـ»
+// صياغة هجرية رقمية: «11/6/1448 هـ» — أرقام شهور لا أسماء (تحديث 40)
 function fmtHijriFull(iso) {
-  const dt = isoToLocalDate(iso);
-  if (!dt) return '';
-  return new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', { day: 'numeric', month: 'long', year: 'numeric' }).format(dt);
+  const h = isoToHijriParts(iso);
+  if (!h) return '';
+  return `${h.d}/${h.m}/${h.y} هـ`;
 }
-// صياغة ميلادية كاملة بأسماء الشهور العربية: «21 نوفمبر 2026»
+// صياغة ميلادية رقمية: «21/11/2026» — أرقام شهور لا أسماء (تحديث 40)
 function fmtGregFull(iso) {
-  const dt = isoToLocalDate(iso);
-  if (!dt) return '';
-  return new Intl.DateTimeFormat('ar-u-ca-gregory', { day: 'numeric', month: 'long', year: 'numeric' }).format(dt);
+  const p = String(iso || '').slice(0, 10).split('-');
+  if (p.length !== 3 || !Number(p[0]) || !Number(p[1]) || !Number(p[2])) return '';
+  return `${Number(p[2])}/${Number(p[1])}/${p[0]}`;
 }
 // عرض تاريخ عقد حسب تقويمه: هجري كامل إن كان العقد هجرياً، وإلا ISO الميلادي كما هو
 function contractDateDisp(c, iso) {
@@ -204,11 +204,11 @@ function periodCountHijriStr(startStr, endStr, cycle) {
 // ==== وقت الإصدار (من الطابع الزمني created_at) بتوقيت الرياض ====
 let fmtRiyadhDate, fmtRiyadhTime, fmtRiyadhTimeHM, fmtClockWeekday, fmtClockHijri, fmtClockTime;
 function initClockFormatters() {
-  fmtRiyadhDate = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, day: 'numeric', month: 'long', year: 'numeric' });
+  fmtRiyadhDate = new Intl.DateTimeFormat('en-GB-u-ca-gregory', { timeZone: CLOCK_TZ, day: '2-digit', month: '2-digit', year: 'numeric' });
   fmtRiyadhTime = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
   fmtRiyadhTimeHM = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, hour: 'numeric', minute: '2-digit', hour12: true });
   fmtClockWeekday = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, weekday: 'long' });
-  fmtClockHijri = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', { timeZone: CLOCK_TZ, day: 'numeric', month: 'long', year: 'numeric' });
+  fmtClockHijri = { format: (d) => { const o = {}; for (const p of new Intl.DateTimeFormat('en-u-ca-islamic-umalqura', { timeZone: CLOCK_TZ, day: 'numeric', month: 'numeric', year: 'numeric' }).formatToParts(d)) if (p.type !== 'literal') o[p.type] = p.value; return `${o.day}/${o.month}/${o.year} هـ`; } };
   fmtClockTime = new Intl.DateTimeFormat('ar-u-ca-gregory', { timeZone: CLOCK_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 }
 initClockFormatters();
@@ -619,16 +619,33 @@ function preDueMessageUr({ company, amount, unitName, dueDate }) {
   const office = company || 'جائیداد انتظامیہ';
   return `${office} کی جانب سے دوستانہ یاد دہانی: ${unitName ? `یونٹ ${unitName} کے ` : ''}کرایے کی قسط ${amount} ${CUR.label} بتاریخ ${dueDate} واجب الادا ہے۔ آپ کے تعاون کا شکریہ۔`;
 }
+function reminderMessageBn({ company, tenantName, amount, unitName, propertyName }) {
+  const from = company ? `${company} এর পক্ষ থেকে` : 'সম্পত্তি ব্যবস্থাপনা অফিসের পক্ষ থেকে';
+  const place = unitName
+    ? `ইউনিট ${unitName}${propertyName ? ` (${propertyName})` : ''} এর ভাড়া বাবদ`
+    : (propertyName ? `${propertyName} এর ভাড়া বাবদ` : 'ভাড়া বাবদ');
+  return [
+    `প্রিয় ${tenantName}, আসসালামু আলাইকুম।`,
+    `${from} জানানো যাচ্ছে যে, ${place} ${amount} ${CUR.label} বকেয়া রয়েছে।`,
+    'অনুগ্রহ করে যত দ্রুত সম্ভব পরিশোধ করুন। আপনার সহযোগিতার জন্য ধন্যবাদ।',
+  ].join('\n');
+}
+function preDueMessageBn({ company, amount, unitName, dueDate }) {
+  const office = company || 'সম্পত্তি ব্যবস্থাপনা অফিস';
+  return `${office} এর পক্ষ থেকে বন্ধুত্বপূর্ণ অনুস্মারক: ${unitName ? `ইউনিট ${unitName} এর ` : ''}ভাড়ার কিস্তি ${amount} ${CUR.label}, পরিশোধের তারিখ ${dueDate}। আপনার সহযোগিতার জন্য ধন্যবাদ।`;
+}
 // اختيار القالب حسب الوضع: slots.mode = 'predue' قبل الاستحقاق،
 // وغير ذلك رسالة المتأخرات الحالية. الوضع يُحسم من تاريخ الاستحقاق.
 function reminderMessageFor(lang, slots) {
   if (slots && slots.mode === 'predue') {
     if (lang === 'en') return preDueMessageEn(slots);
     if (lang === 'ur') return preDueMessageUr(slots);
+    if (lang === 'bn') return preDueMessageBn(slots);
     return preDueMessage(slots);
   }
   if (lang === 'en') return reminderMessageEn(slots);
   if (lang === 'ur') return reminderMessageUr(slots);
+  if (lang === 'bn') return reminderMessageBn(slots);
   return reminderMessage(slots);
 }
 function reminderLink(phone, message) {
@@ -706,6 +723,7 @@ function openReminderModal(t, slots) {
       <option value="ar" selected>العربية</option>
       <option value="en">English</option>
       <option value="ur">اردو</option>
+      <option value="bn">বাংলা (بنغالي)</option>
     </select></label>
     <div class="amount-words" id="reminderText" style="white-space:pre-wrap">${esc(currentMsg)}</div>
     <div class="form-actions">
@@ -718,8 +736,8 @@ function openReminderModal(t, slots) {
     currentMsg = reminderMessageFor(lang, slots);
     const box = $('#reminderText');
     box.textContent = currentMsg;
-    box.dir = lang === 'en' ? 'ltr' : 'rtl';
-    box.style.textAlign = lang === 'en' ? 'left' : '';
+    box.dir = (lang === 'en' || lang === 'bn') ? 'ltr' : 'rtl';
+    box.style.textAlign = (lang === 'en' || lang === 'bn') ? 'left' : '';
     $('#reminderWa').href = reminderLink(t.phone, currentMsg);
   });
   $('#copyReminder').addEventListener('click', async () => {
@@ -1531,11 +1549,27 @@ async function showReceipt(paymentId, justCreated = false) {
         <div class="verify-note">رمز التحقق: <strong>${esc(r.verify_code)}</strong><br><span class="muted">امسح رمز QR بكاميرا الجوال لعرض بيانات السند ومقارنتها مع هذه الورقة.</span></div></div>` : ''}
       <div class="signatures"><div>توقيع المستلم: ____________</div><div>توقيع المدير: ____________</div></div>
     </div>
-    <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printReceipt()">🖨️ طباعة / حفظ PDF</button>${receiptWaBtn(r)}</div>`;
+    <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printReceipt()">🖨️ معاينة وطباعة</button>${receiptWaBtn(r)}</div>`;
   openModal(justCreated ? `✅ تم إصدار سند قبض رقم ${String(r.receipt_no).padStart(4, '0')}` : 'سند قبض', html);
   $('#printArea').innerHTML = html.split('<div class="form-actions"')[0];
 }
-function printReceipt() { window.print(); }
+function printReceipt() { showPrintPreview(); }
+// معاينة الطباعة (تحديث 40 — بطلب عبده): المستند يظهر كما سيُطبع تماماً في
+// صفحة بيضاء، والطباعة الفعلية لا تبدأ إلا بزر «طباعة الآن» داخل المعاينة
+function showPrintPreview() {
+  const area = $('#printArea');
+  const page = $('#printPreviewPage');
+  if (!area || !page || !area.innerHTML.trim()) { window.print(); return; }
+  page.innerHTML = area.innerHTML;
+  const pv = $('#printPreview');
+  pv.classList.remove('hidden');
+  pv.scrollTop = 0;
+}
+function closePrintPreview() {
+  const pv = $('#printPreview');
+  if (pv) pv.classList.add('hidden');
+}
+function printNowFromPreview() { window.print(); }
 
 // ---------------- المصروفات ----------------
 async function viewExpenses() {
@@ -1644,7 +1678,7 @@ async function showExpenseVoucher(expenseId, justCreated = false) {
       <div class="amount-words">المبلغ بالحروف: ${esc(tafqeet(e.amount))}</div>
       <div class="signatures"><div>المستلم: ____________</div><div>المحاسب: ____________</div><div>الاعتماد: ____________</div></div>
     </div>
-    <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printReceipt()">🖨️ طباعة / حفظ PDF</button></div>`;
+    <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printReceipt()">🖨️ معاينة وطباعة</button></div>`;
   openModal(justCreated ? `✅ تم إصدار سند صرف رقم ${r.voucher_no ? String(r.voucher_no).padStart(4, '0') : ''}` : 'سند صرف', html);
   $('#printArea').innerHTML = html.split('<div class="form-actions"')[0];
 }
@@ -1665,7 +1699,7 @@ async function showTenantStatement(contractId) {
       </table>
       <h3 style="text-align:center">إجمالي المستحق: ${money(s.total_due)} · إجمالي مدفوعات الإيجار: ${money(s.total_paid)}${s.total_other_paid ? ` · مدفوعات أخرى: ${money(s.total_other_paid)}` : ''} · رصيد الإيجار المتبقي: ${money(s.remaining)}</h3>
     </div>`;
-  openModal('كشف حساب مستأجر', doc + `<div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ طباعة / حفظ PDF</button></div>`);
+  openModal('كشف حساب مستأجر', doc + `<div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button></div>`);
   $('#printArea').innerHTML = doc;
 }
 
@@ -1708,7 +1742,7 @@ function printLease(contractId) {
       <div class="signatures"><div>الطرف الأول (المؤجر): ____________</div><div>الطرف الثاني (المستأجر): ____________</div></div>
       <div class="signatures"><div>شاهد أول: ____________</div><div>شاهد ثانٍ: ____________</div></div>
     </div>`;
-  openModal('عقد إيجار — جاهز للطباعة', doc + `<div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ طباعة / حفظ PDF</button></div>`);
+  openModal('عقد إيجار — جاهز للطباعة', doc + `<div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button></div>`);
   $('#printArea').innerHTML = doc;
 }
 
@@ -1864,11 +1898,11 @@ async function loadStatement() {
       <tr><td colspan="2"><strong>إجمالي دفعات المالك</strong></td><td><strong>${money(s.total_payouts)}</strong></td></tr></table>` : ''}
       <h3 style="text-align:center">الصافي المستحق للمالك: ${money(s.net)}</h3>
     </div>`;
-  $('#stmtResult').innerHTML = doc + `<div class="form-actions"><button class="btn primary" onclick="printStatement()">🖨️ طباعة / حفظ PDF</button>
+  $('#stmtResult').innerHTML = doc + `<div class="form-actions"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>
   <button class="btn" onclick="downloadStatementXlsx(${s.property.id}, '${esc(from)}', '${esc(to)}')">⬇️ تنزيل إكسل</button></div>`;
   $('#printArea').innerHTML = doc;
 }
-function printStatement() { window.print(); }
+function printStatement() { showPrintPreview(); }
 function downloadStatementXlsx(propertyId, from, to) {
   const a = document.createElement('a');
   a.href = `/api/properties/${propertyId}/statement.xlsx?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&token=${encodeURIComponent(token())}`;
@@ -1929,7 +1963,7 @@ async function loadOwnerCombined(idx) {
       <table><tr><th>إجمالي الإيرادات</th><th>إجمالي المصروفات</th><th>إجمالي دفعات المالك</th><th>صافي الفترة</th></tr>
       <tr><td>${money(r.total_income)}</td><td>${money(r.total_expenses)}</td><td>${money(r.total_payouts)}</td><td><strong>${money(r.net)}</strong></td></tr></table>
     </div>`;
-  $('#ownStmtResult').innerHTML = doc + `<div class="form-actions"><button class="btn primary" onclick="printStatement()">🖨️ طباعة / حفظ PDF</button>
+  $('#ownStmtResult').innerHTML = doc + `<div class="form-actions"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>
   <button class="btn" onclick="downloadOwnerCombinedXlsx(${idx}, '${esc(from)}', '${esc(to)}')">⬇️ تنزيل إكسل</button></div>`;
   $('#printArea').innerHTML = doc;
 }
@@ -1991,7 +2025,7 @@ async function loadMonthly() {
       ${r.by_purpose.map((x) => `<tr><td>${esc(x.purpose)}</td><td>${x.count}</td><td>${money(x.total)}</td></tr>`).join('')}</table>`
       : '<p class="muted">لا توجد تحصيلات في هذا الشهر.</p>'}
     </div>`;
-  $('#monthlyResult').innerHTML = doc + `<div class="form-actions"><button class="btn primary" onclick="printStatement()">🖨️ طباعة / حفظ PDF</button></div>`;
+  $('#monthlyResult').innerHTML = doc + `<div class="form-actions"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button></div>`;
   $('#printArea').innerHTML = doc;
 }
 
@@ -2050,7 +2084,7 @@ async function loadReports() {
       <p style="text-align:center" class="muted">الفترة: من ${esc(from)} إلى ${esc(to)} · العقار: ${propLabel}</p>
       ${tableHtml}
     </div>`;
-  $('#repResult').innerHTML = doc + `<div class="form-actions"><button class="btn primary" onclick="printStatement()">🖨️ طباعة / حفظ PDF</button>
+  $('#repResult').innerHTML = doc + `<div class="form-actions"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>
   <button class="btn" onclick="downloadReportXlsx('${esc(type)}', '${esc(from)}', '${esc(to)}', '${esc(pid)}')">⬇️ تنزيل إكسل</button></div>`;
   $('#printArea').innerHTML = doc;
 }

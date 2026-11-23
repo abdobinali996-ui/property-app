@@ -1696,9 +1696,6 @@ app.get('/api/dashboard', auth, async (req, res) => {
       .filter((p) => calc.fmtDate(p.payment_date).startsWith(ym))
       .reduce((s, p) => s + Number(p.amount || 0), 0);
     const [rawContracts] = await Promise.all([db.list('contracts')]);
-    const dueThisMonth = rawContracts
-      .filter((c) => c.status === 'active')
-      .reduce((s, c) => s + calc.dueInMonth(c, now.getFullYear(), now.getMonth()), 0);
     const arrearsList = contracts
       .filter((c) => c.arrears > 0)
       .sort((a, b) => b.arrears - a.arrears)
@@ -1775,6 +1772,13 @@ app.get('/api/dashboard', auth, async (req, res) => {
     }
     duesList.sort((a, b) => (b.owed_now - a.owed_now) || (b.arrears - a.arrears)
       || String(a.next_due_date || '9999').localeCompare(String(b.next_due_date || '9999')));
+    // «المستحق هذا الشهر» (تحديث 40 — بطلب عبده): ما تبقّى تحصيله فعلياً =
+    // المستحق الآن على أقساط بدأت + باقي أي قسط يبدأ خلال ١٠ أيام قادمة.
+    // (قبل ذلك كان مجموع مبالغ أقساط الشهر كاملة ولو سُدّدت: أظهر ٧٬٣٧٥
+    // بينما الباقي الفعلي ٨٬٧٥٠ + ٣٠٠ = ٩٬٠٥٠)
+    const dueThisMonth = calc.round2(duesList.reduce((s, r) => s + (Number(r.owed_now) || 0)
+      + (r.next_due_date && r.next_due_date > todayIso && r.next_due_date <= in10Iso
+        ? (Number(r.next_remaining) || 0) : 0), 0));
     // تفصيل محصّل هذا الشهر حسب أقسام طريقة الدفع (نقدي/بنك/شيك/منصة بفرعيها/أخرى)
     const perMethodDash = new Map();
     for (const p of payments) {
