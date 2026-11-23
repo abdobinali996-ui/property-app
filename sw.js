@@ -1,5 +1,5 @@
 // Service Worker — يخزّن ملفات الواجهة للفتح السريع، والبيانات دائماً من الخادم
-const CACHE = 'pm-app-v38';
+const CACHE = 'pm-app-v39';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'qrcode.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'dhikr-istighfar.mp3', 'dhikr-salawat.mp3'];
 
 self.addEventListener('install', (e) => {
@@ -17,6 +17,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.pathname.includes('/api/')) return; // بيانات حية — لا تخزين
+  if (url.pathname.startsWith('/board') || url.pathname === '/sitemap.xml' || url.pathname === '/robots.txt') return; // اللوحة العامة: من الشبكة دائماً
   // ملفات الواجهة المتغيرة (صفحة/جافاسكربت/تنسيق): الشبكة أولاً ثم الذاكرة
   // عند غياب الاتصال — حتى تصل أي نسخة جديدة مع أول فتح مهما تأخر
   // تحديث عامل الخدمة نفسه

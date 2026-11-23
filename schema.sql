@@ -192,3 +192,14 @@ CREATE INDEX IF NOT EXISTS contracts_unit_idx    ON contracts(unit_id);
 CREATE INDEX IF NOT EXISTS contracts_tenant_idx  ON contracts(tenant_id);
 CREATE INDEX IF NOT EXISTS payments_contract_idx ON payments(contract_id);
 CREATE INDEX IF NOT EXISTS expenses_property_idx ON expenses(property_id);
+
+-- لوحة الإعلانات العامة (تحديث ٣٩)
+CREATE TABLE IF NOT EXISTS listings (
+  id SERIAL PRIMARY KEY, title TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'إيجار',
+  price NUMERIC(14,2) NOT NULL DEFAULT 0, area_name TEXT DEFAULT '', size_m2 NUMERIC(10,2),
+  rooms INTEGER, baths INTEGER, floor TEXT DEFAULT '', description TEXT DEFAULT '',
+  owner_name TEXT DEFAULT '', phone TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending', featured BOOLEAN NOT NULL DEFAULT FALSE,
+  views INTEGER NOT NULL DEFAULT 0, wa_clicks INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS listings_status_idx ON listings(status);

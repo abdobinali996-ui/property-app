@@ -394,7 +394,7 @@ $('#globalSearchTop').addEventListener('keydown', (e) => {
   else go('dashboard');
 });
 async function render() {
-  const views = { dashboard: viewDashboard, properties: viewProperties, units: viewUnits, tenants: viewTenants, contracts: viewContracts, payments: viewPayments, expenses: viewExpenses, vouchers: viewVouchers, statement: viewStatement, owners: viewOwners, monthly: viewMonthly, reports: viewReports, audit: viewAudit, users: viewUsers, backup: viewBackup, settings: viewSettings };
+  const views = { dashboard: viewDashboard, properties: viewProperties, units: viewUnits, tenants: viewTenants, contracts: viewContracts, payments: viewPayments, expenses: viewExpenses, vouchers: viewVouchers, statement: viewStatement, owners: viewOwners, monthly: viewMonthly, reports: viewReports, listings: viewListings, audit: viewAudit, users: viewUsers, backup: viewBackup, settings: viewSettings };
   main().innerHTML = '<p class="muted">جارٍ التحميل…</p>';
   try { await views[currentView](); } catch (e) { main().innerHTML = `<p class="error">${esc(e.message)}</p>`; }
 }
@@ -2142,6 +2142,93 @@ function userResetPassword(id, username) {
 }
 
 // ---------------- إعدادات المؤسسة ----------------
+// ---------------- لوحة الإعلانات العامة (إدارة) ----------------
+let LST_FILTER = 'pending';
+const LST_STATUS = { pending: ['بانتظار المراجعة', '#fdf6e0', '#8a6d1a'], approved: ['معتمد', '#e7f6ee', '#0d6e3f'], rejected: ['مرفوض', '#fdecea', '#a93226'], hidden: ['مخفي', '#eef1f1', '#5a6f73'] };
+function lstWa(phone) { let d = String(phone || '').replace(/\D/g, ''); if (/^01\d{9}$/.test(d)) d = '20' + d.slice(1); return d; }
+async function viewListings() {
+  const s = (CACHE.settings || {});
+  const all = await api('/api/listings');
+  const counts = { all: all.length, pending: 0, approved: 0, rejected: 0, hidden: 0 };
+  all.forEach((l) => { if (counts[l.status] !== undefined) counts[l.status]++; });
+  const rows = all
+    .filter((l) => LST_FILTER === 'all' || l.status === LST_FILTER)
+    .sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.id - a.id);
+  const photoMap = {};
+  await Promise.all(rows.map(async (l) => {
+    try { photoMap[l.id] = await api(`/api/attachments?entity_type=listing&entity_id=${l.id}`); } catch (_) { photoMap[l.id] = []; }
+  }));
+  const chip = (key, label) => `<button class="btn small ${LST_FILTER === key ? 'primary' : ''}" onclick="LST_FILTER='${key}';viewListings()">${label} (${key === 'all' ? counts.all : counts[key]})</button>`;
+  main().innerHTML = `
+    <div class="section">
+      <h3>🏠 إعلانات اللوحة العامة</h3>
+      ${s.listings_enabled === '1'
+        ? `<p class="muted">اللوحة مفعّلة — رابطها العام: <a href="/board" target="_blank" rel="noopener">${location.origin}/board</a> • أي مالك يقدر يرسل إعلاناً من هناك ويدخل عندك «بانتظار المراجعة» ولا يظهر إلا باعتمادك.</p>`
+        : `<p class="error">اللوحة غير مفعّلة حالياً — فعّلها من «إعدادات المؤسسة» قسم «لوحة الإعلانات العامة» حتى تعمل الصفحات العامة وتصلك إعلانات الملّاك.</p>`}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        ${chip('pending', 'بانتظار المراجعة')} ${chip('approved', 'المعتمدة')} ${chip('rejected', 'المرفوضة')} ${chip('hidden', 'المخفية')} ${chip('all', 'الكل')}
+        <span style="flex:1"></span>
+        <button class="btn primary" onclick="listingForm(null)">+ إعلان جديد</button>
+      </div>
+      ${rows.length ? `<div class="table-wrap"><table>
+        <tr><th>الصورة</th><th>الإعلان</th><th>النوع</th><th>السعر</th><th>المنطقة</th><th>المعلن / الجوال</th><th>الحالة</th><th>👁️ / 💬</th><th>إجراءات</th></tr>
+        ${rows.map((l) => { const st = LST_STATUS[l.status] || LST_STATUS.pending; const ph = photoMap[l.id] || []; return `<tr>
+          <td>${ph.length ? `<img src="/api/attachments/${ph[0].id}/download?token=<redacted>}" alt="" style="width:64px;height:48px;object-fit:cover;border-radius:8px">` : '<span class="muted">بلا صور</span>'}</td>
+          <td><b>${esc(l.title)}</b>${l.featured ? ' ⭐' : ''}<br><span class="muted">#${l.id} • ${esc(String(l.created_at || '').slice(0, 10))}</span></td>
+          <td>${esc(l.kind)}</td>
+          <td>${money(l.price)}</td>
+          <td>${esc(l.area_name || '')}${l.size_m2 ? `<br><span class="muted">${esc(l.size_m2)} م²</span>` : ''}</td>
+          <td>${esc(l.owner_name || '')}<br><a href="https://wa.me/${lstWa(l.phone)}" target="_blank" rel="noopener">${esc(l.phone || '')}</a></td>
+          <td><span style="background:${st[1]};color:${st[2]};padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:700">${st[0]}</span></td>
+          <td>${Number(l.views) || 0} / ${Number(l.wa_clicks) || 0}</td>
+          <td style="white-space:nowrap">
+            ${l.status !== 'approved' ? `<button class="btn small primary" onclick="approveListing(${l.id})">اعتماد</button>` : `<a class="btn small" style="text-decoration:none" href="/board/${l.id}" target="_blank" rel="noopener">عرض</a>`}
+            ${l.status !== 'rejected' ? `<button class="btn small" onclick="rejectListing(${l.id})">رفض</button>` : ''}
+            <button class="btn small" onclick="toggleFeatured(${l.id}, ${l.featured ? 'false' : 'true'})">${l.featured ? 'إلغاء التمييز' : '⭐ تمييز'}</button>
+            <button class="btn small" onclick="showAttachments('listing', ${l.id}, ${JSON.stringify(l.title)})">الصور (${ph.length})</button>
+            <button class="btn small" onclick="listingForm(${l.id})">تعديل</button>
+            <button class="btn small danger" onclick="deleteListing(${l.id})">حذف</button>
+          </td></tr>`; }).join('')}
+      </table></div>` : '<p class="muted">لا توجد إعلانات في هذا القسم بعد.</p>'}
+    </div>`;
+}
+async function approveListing(id) { await api(`/api/listings/${id}/approve`, { method: 'POST' }); viewListings(); }
+async function rejectListing(id) { await api(`/api/listings/${id}/reject`, { method: 'POST' }); viewListings(); }
+async function toggleFeatured(id, v) { await api(`/api/listings/${id}`, { method: 'PUT', body: JSON.stringify({ featured: v }) }); viewListings(); }
+async function deleteListing(id) {
+  const l = (await api('/api/listings')).find((x) => x.id === id);
+  confirmDelete(`الإعلان «${l ? l.title : id}»`, async () => { await api(`/api/listings/${id}`, { method: 'DELETE' }); viewListings(); });
+}
+async function listingForm(id) {
+  const l = id ? (await api('/api/listings')).find((x) => x.id === id) : null;
+  formModal(l ? 'تعديل إعلان' : 'إعلان جديد', `
+    <label>عنوان الإعلان<input name="title" required value="${esc(l?.title || '')}"></label>
+    <div class="form-grid">
+      <label>النوع<select name="kind"><option value="إيجار" ${l?.kind !== 'بيع' ? 'selected' : ''}>للإيجار</option><option value="بيع" ${l?.kind === 'بيع' ? 'selected' : ''}>للبيع</option></select></label>
+      <label>السعر<input name="price" type="number" step="any" required value="${l?.price ?? ''}"></label>
+      <label>المنطقة<input name="area_name" value="${esc(l?.area_name || '')}"></label>
+      <label>المساحة (م²)<input name="size_m2" type="number" step="any" value="${l?.size_m2 ?? ''}"></label>
+      <label>الغرف<input name="rooms" type="number" value="${l?.rooms ?? ''}"></label>
+      <label>الحمامات<input name="baths" type="number" value="${l?.baths ?? ''}"></label>
+      <label>الدور<input name="floor" value="${esc(l?.floor || '')}"></label>
+      <label>اسم المعلن<input name="owner_name" value="${esc(l?.owner_name || '')}"></label>
+      <label>جوال المعلن (واتساب)<input name="phone" value="${esc(l?.phone || '')}"></label>
+      ${l ? `<label>الحالة<select name="status">${Object.entries(LST_STATUS).map(([k, v]) => `<option value="${k}" ${l.status === k ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></label>` : ''}
+    </div>
+    <label>الوصف<textarea name="description" rows="3">${esc(l?.description || '')}</textarea></label>
+    <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="featured" style="width:auto" ${l?.featured ? 'checked' : ''}> إعلان مميز (يظهر أولاً)</label>
+    ${l ? '<p class="muted">لإضافة أو حذف صور الإعلان استخدم زر «الصور» في القائمة.</p>' : '<p class="muted">بعد الحفظ أضف صور الإعلان من زر «الصور» في القائمة.</p>'}
+  `, async (data) => {
+    data.featured = data.featured === 'on';
+    if (data.size_m2 === '') data.size_m2 = null;
+    if (data.rooms === '') data.rooms = null;
+    if (data.baths === '') data.baths = null;
+    if (l) await api(`/api/listings/${l.id}`, { method: 'PUT', body: JSON.stringify(data) });
+    else await api('/api/listings', { method: 'POST', body: JSON.stringify(data) });
+    viewListings();
+  });
+}
+
 async function viewSettings() {
   const s = await api('/api/settings');
   main().innerHTML = `
@@ -2163,6 +2250,15 @@ async function viewSettings() {
         <div class="form-actions"><button type="submit" class="btn primary">حفظ الإعدادات</button></div>
         <p class="error" id="settingsMsg"></p>
       </form>
+    </div>
+    <div class="section">
+      <h3>🏠 لوحة الإعلانات العامة</h3>
+      <p class="muted">صفحة عامة باسم مكتبك لعرض الشقق للبيع والإيجار: أي مالك يقدر يرسل إعلانه من هناك، ويدخل عندك في تبويب «الإعلانات» بانتظار المراجعة — لا يظهر للناس إلا باعتمادك. شارك رابط اللوحة في إعلاناتك وحالات الواتساب.</p>
+      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="boardEnabled" style="width:auto" ${s.listings_enabled === '1' ? 'checked' : ''}> تفعيل لوحة الإعلانات العامة</label>
+      <p style="margin:10px 0 0">رابط اللوحة: <a href="/board" target="_blank" rel="noopener">${location.origin}/board</a>
+      <button type="button" class="btn small" id="boardCopy">نسخ الرابط</button>
+      <a class="btn small" style="text-decoration:none" href="/board" target="_blank" rel="noopener">فتح اللوحة</a></p>
+      <p class="muted" id="boardMsg" style="margin:6px 0 0"></p>
     </div>
     <div class="section">
       <h3>🕌 التذكير بالذكر</h3>
@@ -2218,6 +2314,20 @@ async function viewSettings() {
       msg.style.color = 'var(--ok)';
       msg.textContent = 'تم حفظ الإعدادات ✅';
     } catch (err) { const msg = $('#settingsMsg'); msg.style.color = ''; msg.textContent = err.message; }
+  });
+  // لوحة الإعلانات العامة: التفعيل يُحفظ فوراً عند التبديل
+  $('#boardEnabled').addEventListener('change', async (e) => {
+    const msg = $('#boardMsg');
+    try {
+      await api('/api/settings', { method: 'PUT', body: JSON.stringify({ listings_enabled: e.target.checked ? '1' : '' }) });
+      await refreshCache().catch(() => {});
+      msg.style.color = 'var(--ok)';
+      msg.textContent = e.target.checked ? 'تم تفعيل اللوحة ✅' : 'تم إيقاف اللوحة — صفحاتها العامة لا تظهر الآن';
+    } catch (err) { msg.style.color = ''; msg.textContent = err.message; }
+  });
+  $('#boardCopy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(`${location.origin}/board`); $('#boardMsg').textContent = 'تم نسخ رابط اللوحة ✅'; }
+    catch (_) { $('#boardMsg').textContent = 'انسخ الرابط يدوياً من الأعلى'; }
   });
   // إعدادات التذكير بالذكر — محلية على هذا الجهاز فقط (localStorage)
   const dp = dhikrPrefs();

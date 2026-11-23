@@ -12,13 +12,14 @@ const TABLES = {
   payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by', 'edited_at', 'edit_count', 'deleted_at', 'installment_no'],
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
+  listings: ['title', 'kind', 'price', 'area_name', 'size_m2', 'rooms', 'baths', 'floor', 'description', 'owner_name', 'phone', 'status', 'featured', 'views', 'wa_clicks'],
 };
 
-const ATTACHMENT_TYPES = ['tenant', 'contract', 'payment', 'expense'];
+const ATTACHMENT_TYPES = ['tenant', 'contract', 'payment', 'expense', 'listing'];
 const ATTACHMENT_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'];
 const ATTACHMENT_MAX = 3 * 1024 * 1024;
 
-const SETTING_KEYS = ['company_name', 'company_address', 'company_phones', 'company_extra', 'company_logo', 'country'];
+const SETTING_KEYS = ['company_name', 'company_address', 'company_phones', 'company_extra', 'company_logo', 'country', 'listings_enabled'];
 
 const usePg = !!process.env.DATABASE_URL;
 let pool = null;
@@ -120,6 +121,15 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (LOWER(username));
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT '';
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT '';
+CREATE TABLE IF NOT EXISTS listings (
+  id SERIAL PRIMARY KEY, title TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'إيجار',
+  price NUMERIC(14,2) NOT NULL DEFAULT 0, area_name TEXT DEFAULT '', size_m2 NUMERIC(10,2),
+  rooms INTEGER, baths INTEGER, floor TEXT DEFAULT '', description TEXT DEFAULT '',
+  owner_name TEXT DEFAULT '', phone TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending', featured BOOLEAN NOT NULL DEFAULT FALSE,
+  views INTEGER NOT NULL DEFAULT 0, wa_clicks INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS listings_status_idx ON listings(status);
 `;
 
 // ---------------- مخزن JSON المحلي ----------------
@@ -247,6 +257,12 @@ async function insert(table, obj) {
     if (data.payee === undefined) data.payee = '';
     if (data.payment_method === undefined) data.payment_method = 'نقداً';
   }
+  if (table === 'listings') {
+    if (data.status === undefined) data.status = 'pending';
+    if (data.featured === undefined) data.featured = false;
+    if (data.views === undefined) data.views = 0;
+    if (data.wa_clicks === undefined) data.wa_clicks = 0;
+  }
   const row = { id: ++m.seq[table], created_at: new Date().toISOString(), ...data };
   m[table].push(row);
   saveMem();
@@ -326,7 +342,7 @@ async function remove(table, id) {
 
 // ---------------- إعدادات المؤسسة ----------------
 async function getSettings() {
-  const out = { company_name: '', company_address: '', company_phones: '', company_extra: '', company_logo: '', country: 'sa' };
+  const out = { company_name: '', company_address: '', company_phones: '', company_extra: '', company_logo: '', country: 'sa', listings_enabled: '' };
   if (usePg) {
     const { rows } = await pool.query('SELECT key, value FROM settings');
     for (const r of rows) if (SETTING_KEYS.includes(r.key)) out[r.key] = r.value || '';

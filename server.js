@@ -294,6 +294,7 @@ async function buildAuditSummary(entity, action, row) {
     if (entity === 'units') return `${verb} وحدة: ${r.name || `رقم ${r.id}`}`;
     if (entity === 'meter_readings') return `${verb} قراءة عداد للوحدة رقم ${r.unit_id ?? ''}`;
     if (entity === 'settings') return 'تعديل إعدادات المؤسسة';
+    if (entity === 'listings') return `${verb} إعلان: ${r.title || `رقم ${r.id}`}${r.status ? ` (${LISTING_STATUS_AR[r.status] || r.status})` : ''}`;
     if (entity === 'users') return `${verb} حساب مستخدم: ${r.display_name || r.username || `رقم ${r.id}`}${r.role ? ` (${r.role === 'admin' ? 'مدير' : 'موظف'})` : ''}`;
     if (entity === 'backups') {
       if (action === 'restore') return `استعادة النسخة الاحتياطية رقم ${r.id ?? ''}`;
@@ -1899,6 +1900,397 @@ app.post('/api/backups/:id/restore', auth, adminOnly, async (req, res) => {
     await audit(req, 'backups', snap.id, 'restore', snap);
     await takeSnapshot('auto');
     res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ---------- لوحة الإعلانات العامة (تحديث ٣٩) ----------
+// صفحة عامة لعرض الشقق (بيع/إيجار) يتصفحها أي زائر دون دخول، والمالك يرسل
+// إعلانه من نموذج عام فيدخل «بانتظار المراجعة» ولا يظهر إلا باعتماد المدير.
+// اللوحة مغلقة افتراضياً ولا تعمل إلا بتفعيل «listings_enabled» من الإعدادات.
+const escH = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const boardOn = (s) => !!s && (s.listings_enabled === '1' || s.listings_enabled === 'true');
+const boardCur = (s) => (s && s.country === 'eg' ? 'ج.م' : 'ر.س');
+const fmtPrice = (n, cur) => `${Number(n || 0).toLocaleString('en-US')} ${cur}`;
+function pubBase(req) {
+  const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
+  return `${proto}://${req.headers.host}`;
+}
+function waNumber(phone) {
+  let d = String(phone || '').replace(/\D/g, '');
+  if (/^01\d{9}$/.test(d)) d = '20' + d.slice(1); // رقم مصري محلي → دولي
+  return d;
+}
+const LISTING_STATUS_AR = { pending: 'بانتظار المراجعة', approved: 'معتمد', rejected: 'مرفوض', hidden: 'مخفي' };
+
+async function boardGate(req, res) {
+  const s = await db.getSettings();
+  if (!boardOn(s)) {
+    res.status(404).send('<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>غير متاحة</title></head><body style="font-family:Tahoma;text-align:center;padding:60px 20px;color:#44585c"><h2>هذه الصفحة غير متاحة حالياً</h2><p>لوحة الإعلانات غير مفعّلة.</p></body></html>');
+    return null;
+  }
+  return s;
+}
+
+function boardCss() {
+  return `
+  *{box-sizing:border-box} body{margin:0;font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:#f2f6f6;color:#1c2b2e}
+  a{text-decoration:none;color:inherit}
+  .b-head{background:linear-gradient(135deg,#083f49,#0b5563 60%,#0e6b7a);color:#fff;padding:26px 16px 20px;text-align:center}
+  .b-head h1{margin:0 0 6px;font-size:26px}
+  .b-head p{margin:0;color:#ffd97a;font-weight:700}
+  .b-wrap{max-width:1080px;margin:0 auto;padding:16px}
+  .b-cta{display:inline-block;background:#ffd97a;color:#083f49;font-weight:800;padding:10px 22px;border-radius:999px;margin-top:14px}
+  .b-filters{background:#fff;border-radius:12px;padding:12px;display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+  .b-filters input,.b-filters select{padding:9px 10px;border:1px solid #cfdddf;border-radius:8px;font-size:14px;flex:1;min-width:120px}
+  .b-filters button{background:#0b5563;color:#fff;border:0;border-radius:8px;padding:9px 20px;font-weight:700;cursor:pointer}
+  .b-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .b-card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 1px 5px rgba(0,0,0,.07);display:block;position:relative}
+  .b-card img{width:100%;height:170px;object-fit:cover;background:#dce8ea;display:block}
+  .b-noimg{height:170px;background:#dce8ea;display:flex;align-items:center;justify-content:center;font-size:44px}
+  .b-body{padding:12px 14px}
+  .b-title{font-weight:800;font-size:16px;margin:0 0 5px;line-height:1.5}
+  .b-price{color:#0b5563;font-weight:800;font-size:18px}
+  .b-meta{color:#5a6f73;font-size:13px;margin-top:4px;line-height:1.7}
+  .b-kind{position:absolute;top:10px;right:10px;background:#0b5563;color:#fff;font-size:12px;font-weight:800;padding:3px 12px;border-radius:999px}
+  .b-kind.sale{background:#c9a227;color:#083f49}
+  .b-feat{position:absolute;top:10px;left:10px;background:#ffd97a;color:#083f49;font-size:12px;font-weight:800;padding:3px 12px;border-radius:999px}
+  .b-empty{background:#fff;border-radius:12px;padding:36px;text-align:center;color:#5a6f73}
+  .b-foot{text-align:center;color:#5a6f73;font-size:13px;padding:22px 10px 30px;line-height:1.9}
+  .d-gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:14px}
+  .d-gal img{width:100%;height:210px;object-fit:cover;border-radius:12px}
+  .d-box{background:#fff;border-radius:14px;padding:18px;box-shadow:0 1px 5px rgba(0,0,0,.06)}
+  .d-specs{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:14px 0}
+  .d-spec{background:#f2f6f6;border-radius:10px;padding:9px 12px;font-size:14px}
+  .d-spec b{display:block;color:#0b5563;font-size:12px;margin-bottom:2px}
+  .d-desc{white-space:pre-wrap;line-height:1.9;font-size:15px}
+  .d-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .d-wa{background:#1faa55;color:#fff;font-weight:800;padding:12px 26px;border-radius:999px;display:inline-block}
+  .d-share{background:#eef3f3;color:#083f49;font-weight:700;padding:12px 20px;border-radius:999px;border:1px solid #cfdddf;cursor:pointer}
+  form.f-box{background:#fff;border-radius:14px;padding:20px;box-shadow:0 1px 5px rgba(0,0,0,.06)}
+  form.f-box label{display:block;font-weight:700;font-size:14px;margin:0 0 12px}
+  form.f-box input,form.f-box select,form.f-box textarea{width:100%;padding:10px;border:1px solid #cfdddf;border-radius:8px;margin-top:5px;font-size:15px;font-family:inherit}
+  form.f-box .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  form.f-box button{background:#0b5563;color:#fff;border:0;border-radius:10px;padding:13px 30px;font-weight:800;font-size:16px;cursor:pointer;width:100%}
+  .f-ok{background:#e7f6ee;border:1px solid #1faa55;color:#0d6e3f;border-radius:12px;padding:22px;text-align:center;font-size:17px;line-height:1.9}
+  .f-err{color:#c0392b;font-weight:700;min-height:20px}
+  @media(max-width:560px){form.f-box .row{grid-template-columns:1fr}}`;
+}
+
+function boardHead(title, desc, extra = '') {
+  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escH(title)}</title><meta name="description" content="${escH(desc)}">
+  <style>${boardCss()}</style>${extra}</head><body>`;
+}
+
+async function listingPhotos(id) {
+  try { return await db.listAttachments('listing', Number(id)); } catch (_) { return []; }
+}
+
+// نشر تلقائي على قناة تيليجرام (اختياري): يعمل فقط عند ضبط متغيري البيئة
+// TELEGRAM_BOT_TOKEN و TELEGRAM_CHANNEL_ID على الخادم، وأي فشل يُبتلع بصمت.
+async function telegramPostListing(req, listing) {
+  try {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chat = process.env.TELEGRAM_CHANNEL_ID;
+    if (!token || !chat) return;
+    const s = await db.getSettings();
+    const cur = boardCur(s);
+    const link = `${pubBase(req)}/board/${listing.id}`;
+    const caption = `🏠 ${listing.title}\n💰 ${fmtPrice(listing.price, cur)} — ${escH(listing.kind)}\n📍 ${listing.area_name || ''}${listing.size_m2 ? `\n📐 ${listing.size_m2} م²` : ''}\n\nالتفاصيل والتواصل:\n${link}`;
+    const photos = await listingPhotos(listing.id);
+    if (photos.length) {
+      const att = await db.getAttachment(photos[0].id);
+      if (att && att.data_base64) {
+        const fd = new FormData();
+        fd.append('chat_id', chat);
+        fd.append('caption', caption);
+        fd.append('photo', new Blob([Buffer.from(att.data_base64, 'base64')], { type: att.mime || 'image/jpeg' }), 'photo.jpg');
+        await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: fd });
+        return;
+      }
+    }
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chat, text: caption }),
+    });
+  } catch (_) { /* النشر الخارجي لا يعطّل الاعتماد أبداً */ }
+}
+
+app.get('/robots.txt', async (req, res) => {
+  res.type('text/plain').send(`User-agent: *\nAllow: /board\nDisallow: /api/\nSitemap: ${pubBase(req)}/sitemap.xml\n`);
+});
+
+app.get('/sitemap.xml', async (req, res) => {
+  try {
+    const s = await db.getSettings();
+    const base = pubBase(req);
+    let urls = '';
+    if (boardOn(s)) {
+      const rows = (await db.list('listings')).filter((l) => l.status === 'approved');
+      urls = rows.map((l) => `<url><loc>${base}/board/${l.id}</loc></url>`).join('');
+    }
+    res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${base}/board</loc></url>${urls}</urlset>`);
+  } catch (e) { res.status(500).type('text/plain').send('error'); }
+});
+
+app.get('/board', async (req, res) => {
+  try {
+    const s = await boardGate(req, res);
+    if (!s) return;
+    const cur = boardCur(s);
+    const company = s.company_name || 'لوحة الإعلانات العقارية';
+    const { kind, q, min, max, sort } = req.query;
+    let rows = (await db.list('listings')).filter((l) => l.status === 'approved');
+    if (kind === 'بيع' || kind === 'إيجار') rows = rows.filter((l) => l.kind === kind);
+    if (q) { const needle = String(q).trim(); rows = rows.filter((l) => `${l.title} ${l.area_name} ${l.description || ''}`.includes(needle)); }
+    if (min !== undefined && min !== '' && Number.isFinite(Number(min))) rows = rows.filter((l) => Number(l.price) >= Number(min));
+    if (max !== undefined && max !== '' && Number.isFinite(Number(max))) rows = rows.filter((l) => Number(l.price) <= Number(max));
+    if (sort === 'price_asc') rows.sort((a, b) => Number(a.price) - Number(b.price));
+    else if (sort === 'price_desc') rows.sort((a, b) => Number(b.price) - Number(a.price));
+    else rows.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || b.id - a.id);
+    const cards = [];
+    for (const l of rows.slice(0, 200)) {
+      const ph = await listingPhotos(l.id);
+      cards.push(`<a class="b-card" href="/board/${l.id}">
+        ${ph.length ? `<img src="/board/photo/${ph[0].id}" alt="${escH(l.title)}" loading="lazy">` : '<div class="b-noimg">🏠</div>'}
+        <span class="b-kind ${l.kind === 'بيع' ? 'sale' : ''}">${escH(l.kind)}</span>
+        ${l.featured ? '<span class="b-feat">⭐ مميز</span>' : ''}
+        <div class="b-body"><p class="b-title">${escH(l.title)}</p>
+        <div class="b-price">${fmtPrice(l.price, cur)}</div>
+        <div class="b-meta">📍 ${escH(l.area_name || '')}${l.size_m2 ? ` • 📐 ${escH(l.size_m2)} م²` : ''}${l.rooms ? ` • 🛏️ ${escH(l.rooms)} غرف` : ''}</div></div></a>`);
+    }
+    res.send(`${boardHead(`${company} — شقق للبيع والإيجار`, `شقق معروضة للبيع والإيجار — ${company}`)}
+    <div class="b-head"><h1>${escH(company)}</h1><p>شقق معروضة للبيع والإيجار</p>
+    <a class="b-cta" href="/board/new">+ اعرض شقتك مجاناً</a></div>
+    <div class="b-wrap">
+      <form class="b-filters" method="get" action="/board">
+        <input name="q" placeholder="ابحث بمنطقة أو كلمة…" value="${escH(q || '')}">
+        <select name="kind"><option value="">بيع وإيجار</option><option value="بيع" ${kind === 'بيع' ? 'selected' : ''}>للبيع</option><option value="إيجار" ${kind === 'إيجار' ? 'selected' : ''}>للإيجار</option></select>
+        <input name="min" type="number" min="0" placeholder="السعر من" value="${escH(min || '')}">
+        <input name="max" type="number" min="0" placeholder="السعر إلى" value="${escH(max || '')}">
+        <select name="sort"><option value="">الأحدث أولاً</option><option value="price_asc" ${sort === 'price_asc' ? 'selected' : ''}>السعر: الأقل</option><option value="price_desc" ${sort === 'price_desc' ? 'selected' : ''}>السعر: الأعلى</option></select>
+        <button type="submit">بحث</button>
+      </form>
+      ${cards.length ? `<div class="b-grid">${cards.join('')}</div>` : '<div class="b-empty">لا توجد إعلانات مطابقة حالياً — جرّب تعديل البحث، أو اعرض شقتك أنت أول واحد 😊</div>'}
+      <div class="b-foot">كل الإعلانات تمر بمراجعة الإدارة قبل النشر • ${escH(company)}</div>
+    </div></body></html>`);
+  } catch (e) { res.status(500).send('حدث خطأ — حاول مرة أخرى'); }
+});
+
+app.get('/board/new', async (req, res) => {
+  try {
+    const s = await boardGate(req, res);
+    if (!s) return;
+    const cur = boardCur(s);
+    const company = s.company_name || 'لوحة الإعلانات العقارية';
+    res.send(`${boardHead(`اعرض شقتك — ${company}`, 'انشر إعلان شقتك للبيع أو الإيجار مجاناً')}
+    <div class="b-head"><h1>اعرض شقتك مجاناً</h1><p>بيع أو إيجار — إعلانك يظهر بعد مراجعة الإدارة</p></div>
+    <div class="b-wrap"><div id="formZone">
+      <form class="f-box" id="lstForm">
+        <label>عنوان الإعلان<input name="title" required minlength="5" maxlength="120" placeholder="مثال: شقة ١٢٠ متر في فيصل — شارع العشرين"></label>
+        <div class="row">
+          <label>النوع<select name="kind"><option value="إيجار">للإيجار</option><option value="بيع">للبيع</option></select></label>
+          <label>السعر (${cur})<input name="price" type="number" required min="1" step="any" placeholder="مثال: 8000"></label>
+        </div>
+        <div class="row">
+          <label>المنطقة / الحي<input name="area_name" required maxlength="80" placeholder="مثال: فيصل — الطالبية"></label>
+          <label>المساحة (م²)<input name="size_m2" type="number" min="0" step="any"></label>
+        </div>
+        <div class="row">
+          <label>عدد الغرف<input name="rooms" type="number" min="0" max="30"></label>
+          <label>عدد الحمامات<input name="baths" type="number" min="0" max="15"></label>
+        </div>
+        <div class="row">
+          <label>الدور<input name="floor" maxlength="30" placeholder="مثال: الثالث"></label>
+          <label>اسمك (المالك / المكتب)<input name="owner_name" maxlength="80"></label>
+        </div>
+        <label>رقم الموبايل (واتساب) — هيظهر للمهتمين<input name="phone" required maxlength="20" placeholder="01xxxxxxxxx"></label>
+        <label>وصف الشقة<textarea name="description" rows="4" maxlength="1500" placeholder="التشطيب، الأثاث، القرب من المواصلات…"></textarea></label>
+        <label>صور الشقة (حتى ٥ صور)<input type="file" id="lstPhotos" accept="image/*" multiple></label>
+        <input type="text" name="website" style="display:none" tabindex="-1" autocomplete="off">
+        <p class="f-err" id="lstMsg"></p>
+        <button type="submit" id="lstSend">إرسال الإعلان للمراجعة</button>
+        <p style="color:#5a6f73;font-size:13px;line-height:1.8">بإرسالك الإعلان أنت مسؤول عن صحة بياناته. الإدارة تراجع كل إعلان قبل نشره.</p>
+      </form></div>
+      <div class="b-foot"><a href="/board">← الرجوع لكل الإعلانات</a></div>
+    </div>
+    <script>
+      document.getElementById('lstForm').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const msg = document.getElementById('lstMsg');
+        const btn = document.getElementById('lstSend');
+        const data = Object.fromEntries(new FormData(ev.target).entries());
+        msg.textContent = '';
+        try {
+          btn.disabled = true; btn.textContent = 'جارٍ الإرسال…';
+          const files = [...document.getElementById('lstPhotos').files].slice(0, 5);
+          data.photos = [];
+          for (const f of files) {
+            const url = await new Promise((res, rej) => {
+              const img = new Image();
+              img.onload = () => {
+                const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+                const c = document.createElement('canvas');
+                c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+                c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                res(c.toDataURL('image/jpeg', 0.82));
+              };
+              img.onerror = rej;
+              const r = new FileReader(); r.onload = () => { img.src = r.result; }; r.onerror = rej; r.readAsDataURL(f);
+            });
+            data.photos.push({ filename: f.name || 'photo.jpg', mime: 'image/jpeg', data_base64: String(url).split(',')[1] });
+          }
+          const r = await fetch('/board/new', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || 'تعذر إرسال الإعلان');
+          document.getElementById('formZone').innerHTML = '<div class="f-ok">✅ تم استلام إعلانك بنجاح<br>سيظهر في اللوحة بعد مراجعة الإدارة — شكراً لك</div>';
+        } catch (e) { msg.textContent = e.message; btn.disabled = false; btn.textContent = 'إرسال الإعلان للمراجعة'; }
+      });
+    </script></body></html>`);
+  } catch (e) { res.status(500).send('حدث خطأ — حاول مرة أخرى'); }
+});
+
+app.post('/board/new', async (req, res) => {
+  try {
+    const s = await db.getSettings();
+    if (!boardOn(s)) return res.status(404).json({ error: 'اللوحة غير مفعلة' });
+    const b = req.body || {};
+    if (b.website) return res.status(400).json({ error: 'طلب غير صالح' }); // مصيدة سبام
+    const title = String(b.title || '').trim();
+    const kind = b.kind === 'بيع' ? 'بيع' : 'إيجار';
+    const price = Number(b.price);
+    const area = String(b.area_name || '').trim();
+    const phone = String(b.phone || '').trim();
+    if (title.length < 5) return res.status(400).json({ error: 'اكتب عنواناً واضحاً للإعلان (٥ أحرف على الأقل)' });
+    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ error: 'اكتب سعراً صحيحاً' });
+    if (!area) return res.status(400).json({ error: 'اكتب المنطقة' });
+    if (phone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'اكتب رقم موبايل صحيحاً للتواصل' });
+    const photos = Array.isArray(b.photos) ? b.photos.slice(0, 5) : [];
+    const IMG_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+    for (const p of photos) {
+      if (!IMG_MIMES.includes(p.mime)) return res.status(400).json({ error: 'صور الإعلان يجب أن تكون صوراً فقط' });
+      if (!p.data_base64 || Buffer.from(String(p.data_base64), 'base64').length > db.ATTACHMENT_MAX) return res.status(400).json({ error: 'حجم صورة يتجاوز ٣ ميجابايت' });
+    }
+    const row = await db.insert('listings', {
+      title: title.slice(0, 120), kind, price,
+      area_name: area.slice(0, 80),
+      size_m2: b.size_m2 === '' || b.size_m2 === undefined ? null : Number(b.size_m2),
+      rooms: b.rooms === '' || b.rooms === undefined ? null : Math.floor(Number(b.rooms)),
+      baths: b.baths === '' || b.baths === undefined ? null : Math.floor(Number(b.baths)),
+      floor: String(b.floor || '').slice(0, 30),
+      description: String(b.description || '').slice(0, 1500),
+      owner_name: String(b.owner_name || '').slice(0, 80),
+      phone: phone.slice(0, 20),
+      status: 'pending', featured: false, views: 0, wa_clicks: 0,
+    });
+    for (const p of photos) {
+      await db.insertAttachment({
+        entity_type: 'listing', entity_id: row.id,
+        filename: String(p.filename || 'photo.jpg').slice(0, 120), mime: p.mime,
+        size: Buffer.from(String(p.data_base64), 'base64').length, data_base64: String(p.data_base64),
+      });
+    }
+    res.status(201).json({ ok: true, id: row.id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/board/photo/:id', async (req, res) => {
+  try {
+    const s = await db.getSettings();
+    if (!boardOn(s)) return res.status(404).end();
+    const a = await db.getAttachment(req.params.id);
+    if (!a || a.entity_type !== 'listing') return res.status(404).end();
+    const listing = await db.get('listings', a.entity_id);
+    if (!listing || listing.status !== 'approved') return res.status(404).end();
+    res.setHeader('Content-Type', a.mime);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(Buffer.from(a.data_base64, 'base64'));
+  } catch (e) { res.status(500).end(); }
+});
+
+app.get('/board/:id/whatsapp', async (req, res) => {
+  try {
+    const s = await db.getSettings();
+    if (!boardOn(s)) return res.status(404).end();
+    const l = await db.get('listings', req.params.id);
+    if (!l || l.status !== 'approved') return res.status(404).end();
+    db.update('listings', l.id, { wa_clicks: (Number(l.wa_clicks) || 0) + 1 }).catch(() => {});
+    const text = encodeURIComponent(`مرحباً، أنا مهتم بإعلانكم: ${l.title} — ${pubBase(req)}/board/${l.id}`);
+    res.redirect(302, `https://wa.me/${waNumber(l.phone)}?text=${text}`);
+  } catch (e) { res.status(500).end(); }
+});
+
+app.get('/board/:id', async (req, res) => {
+  try {
+    const s = await boardGate(req, res);
+    if (!s) return;
+    const l = await db.get('listings', req.params.id);
+    if (!l || l.status !== 'approved') { res.status(404).send('<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>غير موجود</title></head><body style="font-family:Tahoma;text-align:center;padding:60px 20px;color:#44585c"><h2>الإعلان غير موجود أو غير منشور</h2><p><a href="/board">الرجوع للوحة الإعلانات</a></p></body></html>'); return; }
+    db.update('listings', l.id, { views: (Number(l.views) || 0) + 1 }).catch(() => {});
+    const cur = boardCur(s);
+    const company = s.company_name || 'لوحة الإعلانات العقارية';
+    const base = pubBase(req);
+    const ph = await listingPhotos(l.id);
+    const ld = {
+      '@context': 'https://schema.org', '@type': 'RealEstateListing', name: l.title,
+      description: (l.description || '').slice(0, 300), url: `${base}/board/${l.id}`,
+      address: { '@type': 'PostalAddress', addressLocality: l.area_name || '' },
+      offers: { '@type': 'Offer', price: Number(l.price) || 0, priceCurrency: s.country === 'eg' ? 'EGP' : 'SAR', availability: 'https://schema.org/InStock' },
+    };
+    const specs = [
+      ['النوع', l.kind], ['السعر', fmtPrice(l.price, cur)], ['المنطقة', l.area_name],
+      l.size_m2 ? ['المساحة', `${l.size_m2} م²`] : null,
+      l.rooms ? ['الغرف', l.rooms] : null, l.baths ? ['الحمامات', l.baths] : null,
+      l.floor ? ['الدور', l.floor] : null,
+      l.owner_name ? ['المعلن', l.owner_name] : null,
+    ].filter(Boolean);
+    const adText = `${l.title}\n${l.kind} — ${fmtPrice(l.price, cur)}\nالمنطقة: ${l.area_name || ''}${l.size_m2 ? ` — ${l.size_m2} م²` : ''}${l.rooms ? ` — ${l.rooms} غرف` : ''}\nالتفاصيل: ${base}/board/${l.id}`;
+    res.send(`${boardHead(`${l.title} — ${company}`, (l.description || `${l.kind} في ${l.area_name || ''} بسعر ${fmtPrice(l.price, cur)}`).slice(0, 160),
+      `<meta property="og:title" content="${escH(l.title)}"><meta property="og:description" content="${escH((l.description || '').slice(0, 150))}">${ph.length ? `<meta property="og:image" content="${base}/board/photo/${ph[0].id}">` : ''}<script type="application/ld+json">${JSON.stringify(ld)}</script>`)}
+    <div class="b-head"><h1 style="font-size:22px">${escH(company)}</h1><p><a href="/board" style="color:#ffd97a">← كل الإعلانات</a></p></div>
+    <div class="b-wrap">
+      ${ph.length ? `<div class="d-gal">${ph.map((p) => `<img src="/board/photo/${p.id}" alt="${escH(l.title)}">`).join('')}</div>` : ''}
+      <div class="d-box">
+        <h2 style="margin:0 0 4px;font-size:22px;line-height:1.6">${escH(l.title)} ${l.featured ? '⭐' : ''}</h2>
+        <div class="b-price" style="font-size:24px">${fmtPrice(l.price, cur)} <span style="font-size:14px;color:#5a6f73">(${escH(l.kind)})</span></div>
+        <div class="d-specs">${specs.map(([k, v]) => `<div class="d-spec"><b>${escH(k)}</b>${escH(v)}</div>`).join('')}</div>
+        ${l.description ? `<div class="d-desc">${escH(l.description)}</div>` : ''}
+        <div class="d-actions">
+          <a class="d-wa" href="/board/${l.id}/whatsapp" target="_blank" rel="noopener">💬 تواصل واتساب مع المعلن</a>
+          <a class="d-share" href="https://wa.me/?text=${encodeURIComponent(adText)}" target="_blank" rel="noopener">مشاركة واتساب</a>
+          <a class="d-share" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(`${base}/board/${l.id}`)}" target="_blank" rel="noopener">مشاركة فيسبوك</a>
+          <button class="d-share" id="copyAdBtn" type="button">📋 انسخ الإعلان</button>
+        </div>
+        <script>document.getElementById('copyAdBtn').addEventListener('click',function(){var t=${JSON.stringify(adText).replace(/</g, '\\u003c')};if(navigator.clipboard){navigator.clipboard.writeText(t).then(function(){document.getElementById('copyAdBtn').textContent='✅ تم نسخ الإعلان';});}});</script>
+        <p style="color:#5a6f73;font-size:12.5px;margin:14px 0 0">إعلان رقم ${l.id} • 👁️ ${Number(l.views) || 0} مشاهدة • الإدارة غير مسؤولة عن صحة بيانات الإعلان — تحقق بنفسك قبل أي تعاقد</p>
+      </div>
+      <div class="b-foot"><a href="/board/new">+ اعرض شقتك أنت كمان — مجاناً</a></div>
+    </div></body></html>`);
+  } catch (e) { res.status(500).send('حدث خطأ — حاول مرة أخرى'); }
+});
+
+// اعتماد إعلان: يُنشر على اللوحة ويُبثّ على تيليجرام (إن كان مضبوطاً) مرة واحدة
+app.post('/api/listings/:id/approve', auth, adminOnly, async (req, res) => {
+  try {
+    const before = await db.get('listings', req.params.id);
+    if (!before) return res.status(404).json({ error: 'غير موجود' });
+    const row = await db.update('listings', req.params.id, { status: 'approved' });
+    await audit(req, 'listings', row.id, 'update', row);
+    await takeSnapshot('auto');
+    if (before.status !== 'approved') telegramPostListing(req, row);
+    res.json(row);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/listings/:id/reject', auth, adminOnly, async (req, res) => {
+  try {
+    const before = await db.get('listings', req.params.id);
+    if (!before) return res.status(404).json({ error: 'غير موجود' });
+    const row = await db.update('listings', req.params.id, { status: 'rejected' });
+    await audit(req, 'listings', row.id, 'update', row);
+    await takeSnapshot('auto');
+    res.json(row);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
