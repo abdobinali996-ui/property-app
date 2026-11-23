@@ -1703,6 +1703,9 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     const hijriBox = document.getElementById('periodHijri');
     let periodTouched = false;
     let toTouched = false;
+    // تُسنَد بعد تعريف fillInstallments بالأسفل؛ قبلها تبقى بلا عمل حتى لا
+    // تنكسر التهيئة الأولى (تحديث 51)
+    let refreshInstallments = () => {};
     let svcMonths = 0;
     const gregToHijriFill = () => {
       const f = isoToHijriParts(fromEl.value);
@@ -1777,6 +1780,9 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       contractEl.innerHTML = list.map((c) => `<option value="${c.id}">${esc(c.unit_name)} — من ${esc(c.start_date)} إلى ${esc(c.end_date || '')}</option>`).join('');
       if ([...contractEl.options].some((o) => o.value === cur)) contractEl.value = cur;
       onContractChanged();
+      // قائمة الأقساط لازم تتحدث مع العقد الجديد فوراً — كانت تفضل بمبالغ
+      // العقد الأول في القائمة (تحديث 51: بلاغ عبده عن اختلاط المبالغ)
+      refreshInstallments();
     };
     const fillTenants = () => {
       const pid = propEl.value ? Number(propEl.value) : null;
@@ -1829,6 +1835,7 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       instEl.innerHTML = `<option value="">تلقائي — حسب ترتيب السندات</option>` + Array.from({ length: n }, (_, i) => `<option value="${i + 1}">القسط رقم ${i + 1}${amounts[i] != null ? ` — ${money(amounts[i])}` : ''}</option>`).join('');
       if ([...instEl.options].some((o) => o.value === cur)) instEl.value = cur;
     };
+    refreshInstallments = fillInstallments;
     const svcBox = document.getElementById('svcPeriod');
     const syncPurpose = () => {
       const isRent = !purposeEl || purposeEl.value === 'إيجار';
