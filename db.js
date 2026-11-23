@@ -13,6 +13,7 @@ const TABLES = {
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
   listings: ['title', 'kind', 'price', 'area_name', 'size_m2', 'rooms', 'baths', 'floor', 'description', 'owner_name', 'phone', 'status', 'featured', 'views', 'wa_clicks'],
+  letters: ['tenant_id', 'contract_id', 'type', 'lang2', 'data', 'text', 'created_by'],
 };
 
 const ATTACHMENT_TYPES = ['tenant', 'contract', 'payment', 'expense', 'listing'];
@@ -130,6 +131,10 @@ CREATE TABLE IF NOT EXISTS listings (
   views INTEGER NOT NULL DEFAULT 0, wa_clicks INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS listings_status_idx ON listings(status);
+CREATE TABLE IF NOT EXISTS letters (
+  id SERIAL PRIMARY KEY, tenant_id INTEGER, contract_id INTEGER,
+  type TEXT NOT NULL DEFAULT '', lang2 TEXT DEFAULT '', data TEXT DEFAULT '', text TEXT DEFAULT '',
+  created_by TEXT DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 `;
 
 // ---------------- مخزن JSON المحلي ----------------
@@ -454,7 +459,7 @@ async function exportAll() {
 }
 
 async function importAll(data) {
-  const order = ['properties', 'tenants', 'units', 'meter_readings', 'contracts', 'payments', 'expenses'];
+  const order = ['properties', 'tenants', 'units', 'meter_readings', 'contracts', 'payments', 'expenses', 'letters'];
   if (usePg) {
     const client = await pool.connect();
     try {

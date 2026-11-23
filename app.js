@@ -394,7 +394,7 @@ $('#globalSearchTop').addEventListener('keydown', (e) => {
   else go('dashboard');
 });
 async function render() {
-  const views = { dashboard: viewDashboard, properties: viewProperties, units: viewUnits, tenants: viewTenants, contracts: viewContracts, payments: viewPayments, expenses: viewExpenses, vouchers: viewVouchers, statement: viewStatement, owners: viewOwners, monthly: viewMonthly, reports: viewReports, listings: viewListings, audit: viewAudit, users: viewUsers, backup: viewBackup, settings: viewSettings };
+  const views = { dashboard: viewDashboard, properties: viewProperties, units: viewUnits, tenants: viewTenants, contracts: viewContracts, payments: viewPayments, expenses: viewExpenses, vouchers: viewVouchers, statement: viewStatement, owners: viewOwners, monthly: viewMonthly, reports: viewReports, listings: viewListings, letters: viewLetters, audit: viewAudit, users: viewUsers, backup: viewBackup, settings: viewSettings };
   main().innerHTML = '<p class="muted">جارٍ التحميل…</p>';
   try { await views[currentView](); } catch (e) { main().innerHTML = `<p class="error">${esc(e.message)}</p>`; }
 }
@@ -840,6 +840,264 @@ function tenantForm(id) {
     async (data) => { id ? await api(`/api/tenants/${id}`, { method: 'PUT', body: JSON.stringify(data) }) : await api('/api/tenants', { method: 'POST', body: JSON.stringify(data) }); render(); });
 }
 
+// ---------------- خطابات الزيادة والإخلاء (تحديث 43) ----------------
+// العربية هي الأساس دائماً، ويمكن إضافة لغة ثانية أسفلها: إنجليزي/أردو/بنغالي
+const LETTER_CYCLES = {
+  ar: CYCLE_LABELS,
+  en: { monthly: 'monthly', quarterly: 'quarterly', semiannual: 'semi-annual', annual: 'annual' },
+  ur: { monthly: 'ماہانہ', quarterly: 'سہ ماہی', semiannual: 'ششماہی', annual: 'سالانہ' },
+  bn: { monthly: 'মাসিক', quarterly: 'ত্রৈমাসিক', semiannual: 'ষাণ্মাসিক', annual: 'বার্ষিক' },
+};
+const LETTER_REASONS = {
+  expiry: { ar: 'انتهاء مدة العقد', en: 'expiry of the lease term', ur: 'مدتِ کرایہ ختم ہونا', bn: 'ইজারার মেয়াদ শেষ হওয়া' },
+  late: { ar: 'التأخر في سداد الإيجار', en: 'delay in rent payment', ur: 'کرایہ کی ادائیگی میں تاخیر', bn: 'ভাড়া পরিশোধে বিলম্ব' },
+  owner: { ar: 'رغبة المالك في استرداد الوحدة', en: "the owner's wish to recover the unit", ur: 'مالک کی یونٹ واپس لینے کی خواہش', bn: 'মালিকের ইউনিট ফেরত নেওয়ার ইচ্ছা' },
+  other: { ar: 'أسباب إدارية', en: 'administrative reasons', ur: 'انتظامی وجوہات', bn: 'প্রশাসনিক কারণ' },
+};
+const LETTER_SIG = { ar: 'إدارة المكتب', en: 'The Management', ur: 'دفتر انتظامیہ', bn: 'ব্যবস্থাপনা' };
+const LETTER_SIGN_LABEL = { ar: 'التوقيع', en: 'Signature', ur: 'دستخط', bn: 'স্বাক্ষর' };
+const LETTER_STAMP_LABEL = { ar: 'الختم', en: 'Stamp', ur: 'مہر', bn: 'সিল' };
+const LETTER_TYPE_LABELS = { renewal: 'نهاية إيجار وزيادة عند التجديد', increase: 'زيادة القيمة الإيجارية', eviction: 'إخلاء الوحدة' };
+function letterText(lang, type, d) {
+  const cyc = (LETTER_CYCLES[lang] || LETTER_CYCLES.ar)[d.cycle] || d.cycle;
+  const reason = (LETTER_REASONS[d.reasonKey] || LETTER_REASONS.other)[lang];
+  if (type === 'renewal') {
+    // قالب عبده: نهاية الإيجار + زيادة عند التجديد + عقد إلكتروني + ختم وتوقيع
+    if (lang === 'en') return { title: 'Notice of Lease End and Renewal Terms', stampRow: true, paras: [
+      `Dear Mr./Ms. ${d.tenantName},`,
+      `Tenant of unit: ${d.unitName} — at property: ${d.propertyName} — owned by: ${d.ownerName}.`,
+      `Please be informed that your lease ends on ${d.endDate}. Kindly note that upon renewal the rent will be increased to ${d.newAmount} ${CUR.code} per installment (${cyc}), and a new electronic contract will be issued.`,
+      'Please let us know whether you agree to renew on these terms, or vacate the unit by the stated date. Thank you for your cooperation.',
+      `With greetings from ${d.company}`,
+    ] };
+    if (lang === 'ur') return { title: 'کرایہ ختم ہونے اور تجدید کی اطلاع', stampRow: true, paras: [
+      `محترم ${d.tenantName} صاحب/صاحبہ،`,
+      `یونٹ (${d.unitName})، عمارت (${d.propertyName}) کے کرایہ دار — جس کے مالک ${d.ownerName} ہیں۔`,
+      `آپ کو مطلع کیا جاتا ہے کہ آپ کا کرایہ ${d.endDate} کو ختم ہو رہا ہے۔ براہ کرم نوٹ فرمائیں کہ تجدید کی صورت میں کرایہ بڑھا کر فی قسط (${cyc}) ${d.newAmount} ${CUR.label} کر دیا جائے گا، اور نیا الیکٹرانک عقد لکھا جائے گا۔`,
+      'براہ کرم ان شرائط پر تجدید سے اتفاق یا مقررہ تاریخ تک یونٹ خالی کرنے سے متعلق آگاہ فرمائیں۔ آپ کے تعاون کا شکریہ۔',
+      `${d.company} کی جانب سے نیک تمناؤں کے ساتھ`,
+    ] };
+    if (lang === 'bn') return { title: 'ইজারা শেষ ও নবায়নের নোটিশ', stampRow: true, paras: [
+      `প্রিয় জনাব/জনাবা ${d.tenantName},`,
+      `ইউনিট: ${d.unitName} — সম্পত্তি: ${d.propertyName} — যার মালিক: ${d.ownerName} — এর ভাড়াটিয়া।`,
+      `আপনাকে জানানো যাচ্ছে যে, আপনার ইজারা ${d.endDate} তারিখে শেষ হচ্ছে। অনুগ্রহ করে লক্ষ্য করুন, নবায়নের ক্ষেত্রে ভাড়া বাড়িয়ে প্রতি কিস্তিতে (${cyc}) ${d.newAmount} ${CUR.label} করা হবে এবং একটি নতুন ইলেকট্রনিক চুক্তি করা হবে।`,
+      'অনুগ্রহ করে এই শর্তে নবায়নে আপনার সম্মতি জানান অথবা নির্ধারিত তারিখের মধ্যে ইউনিটটি খালি করুন। আপনার সহযোগিতার জন্য ধন্যবাদ।',
+      `${d.company} এর পক্ষ থেকে শুভেচ্ছাসহ`,
+    ] };
+    return { title: 'خطاب بخصوص نهاية الإيجار وتجديده', stampRow: true, paras: [
+      `السيد/ السيدة: ${d.tenantName} — المحترم،`,
+      `مستأجر وحدة: ${d.unitName} — بالعقار: ${d.propertyName} — لمالكها: ${d.ownerName}.`,
+      `نحيطكم علماً بنهاية الإيجار بتاريخ ${d.endDate}، ويرجى العلم بأنه سيتم زيادة الإيجار إلى ${d.newAmount} ${CUR.label} للقسط (${cyc}) عند التجديد، مع كتابة عقد إلكتروني جديد.`,
+      'نرجو التكرم بإفادتنا بموافقتكم على التجديد بالشروط المذكورة أعلاه، أو إخلاء الوحدة في الموعد المحدد، شاكرين لكم حسن تعاونكم.',
+      `مع تحيات ${d.company}`,
+    ] };
+  }
+  if (lang === 'en') {
+    if (type === 'increase') return { title: 'Notice of Rent Increase', paras: [
+      `Dear ${d.tenantName}, tenant of unit (${d.unitName}) at (${d.propertyName}),`,
+      `Please be informed that the rent for the above unit will be adjusted to ${d.newAmount} ${CUR.code} per installment (${cyc}) instead of ${d.oldAmount} ${CUR.code}, effective ${d.effDate}.`,
+      'Kindly take note and comply with the new rent starting from the stated date. For any inquiries, please contact our office.',
+      'With regards,',
+    ] };
+    return { title: 'Notice to Vacate', paras: [
+      `Dear ${d.tenantName}, tenant of unit (${d.unitName}) at (${d.propertyName}),`,
+      `Please be informed that you are required to vacate the above unit and hand it over to our office no later than ${d.vacateDate}, due to: ${reason}.`,
+      'Kindly comply with the stated date, return the unit in its agreed condition, and settle any outstanding dues before handover.',
+      'With regards,',
+    ] };
+  }
+  if (lang === 'ur') {
+    if (type === 'increase') return { title: 'کرایے میں اضافے کا نوٹس', paras: [
+      `محترم ${d.tenantName} صاحب، یونٹ (${d.unitName})، عمارت (${d.propertyName}) کے کرایہ دار،`,
+      'السلام علیکم ورحمۃ اللہ وبرکاتہ۔',
+      `آپ کو مطلع کیا جاتا ہے کہ مذکورہ یونٹ کے کرایے میں ترمیم کر کے فی قسط (${cyc}) ${d.oldAmount} کی بجائے ${d.newAmount} ${CUR.label} مقرر کیا گیا ہے، جس کا اطلاق ${d.effDate} سے ہوگا۔`,
+      'براہ کرم اس سے آگاہ رہیں اور مذکورہ تاریخ سے نئے کرایے کی ادائیگی کا اہتمام فرمائیں۔ کسی استفسار کے لیے دفتر سے رابطہ فرمائیں۔',
+      'والسلام،',
+    ] };
+    return { title: 'اخلاء کا نوٹس', paras: [
+      `محترم ${d.tenantName} صاحب، یونٹ (${d.unitName})، عمارت (${d.propertyName}) کے کرایہ دار،`,
+      'السلام علیکم ورحمۃ اللہ وبرکاتہ۔',
+      `آپ کو مطلع کیا جاتا ہے کہ ${reason} کی وجہ سے مذکورہ یونٹ کو ${d.vacateDate} تک ہر صورت خالی کر کے دفتر کے حوالے کرنا ضروری ہے۔`,
+      'براہ کرم مقررہ تاریخ کی پابندی فرمائیں، یونٹ متفقہ حالت میں حوالے کریں، اور حوالگی سے قبل واجب الادا رقم کی تصفیہ فرمائیں۔',
+      'والسلام،',
+    ] };
+  }
+  if (lang === 'bn') {
+    if (type === 'increase') return { title: 'ভাড়া বৃদ্ধির নোটিশ', paras: [
+      `প্রিয় ${d.tenantName}, (${d.propertyName}) এর ইউনিট (${d.unitName}) এর ভাড়াটিয়া,`,
+      'আসসালামু আলাইকুম।',
+      `আপনাকে জানানো যাচ্ছে যে, উপরোক্ত ইউনিটের ভাড়া প্রতি কিস্তিতে (${cyc}) ${d.oldAmount} ${CUR.label} এর পরিবর্তে ${d.newAmount} ${CUR.label} নির্ধারণ করা হয়েছে, যা ${d.effDate} থেকে কার্যকর হবে।`,
+      'অনুগ্রহ করে বিষয়টি লক্ষ্য করুন এবং উল্লিখিত তারিখ থেকে নতুন ভাড়া পরিশোধ করুন। যেকোনো তথ্যের জন্য আমাদের অফিসে যোগাযোগ করুন।',
+      'শুভেচ্ছান্তে,',
+    ] };
+    return { title: 'খালি করার নোটিশ', paras: [
+      `প্রিয় ${d.tenantName}, (${d.propertyName}) এর ইউনিট (${d.unitName}) এর ভাড়াটিয়া,`,
+      'আসসালামু আলাইকুম।',
+      `আপনাকে জানানো যাচ্ছে যে, ${reason} কারণে উপরোক্ত ইউনিটটি ${d.vacateDate} তারিখের মধ্যে অবশ্যই খালি করে আমাদের অফিসে হস্তান্তর করতে হবে।`,
+      'অনুগ্রহ করে নির্ধারিত তারিখ মেনে চলুন, ইউনিটটি সম্মত অবস্থায় ফেরত দিন এবং হস্তান্তরের আগে সমস্ত বকেয়া পরিশোধ করুন।',
+      'শুভেচ্ছান্তে,',
+    ] };
+  }
+  if (type === 'increase') return { title: 'خطاب إشعار بزيادة القيمة الإيجارية', paras: [
+    `السيد/ ${d.tenantName} — مستأجر الوحدة (${d.unitName}) بالعقار (${d.propertyName}) — المحترم،`,
+    'السلام عليكم ورحمة الله وبركاته،',
+    `نحيطكم علماً بأنه تقرر تعديل القيمة الإيجارية للوحدة المذكورة أعلاه، لتصبح ${d.newAmount} ${CUR.label} للقسط (${cyc}) بدلاً من ${d.oldAmount} ${CUR.label}، وذلك اعتباراً من ${d.effDate}.`,
+    'نرجو التكرم بالعلم والالتزام بالقيمة الجديدة اعتباراً من التاريخ المذكور، وفي حال وجود أي استفسار يسعدنا تواصلكم مع المكتب.',
+    'وتفضلوا بقبول فائق الاحترام والتقدير،',
+  ] };
+  return { title: 'خطاب إشعار بالإخلاء', paras: [
+    `السيد/ ${d.tenantName} — مستأجر الوحدة (${d.unitName}) بالعقار (${d.propertyName}) — المحترم،`,
+    'السلام عليكم ورحمة الله وبركاته،',
+    `نحيطكم علماً بضرورة إخلاء الوحدة المذكورة أعلاه وتسليمها للمكتب في موعد أقصاه ${d.vacateDate}، وذلك بسبب: ${reason}.`,
+    'نرجو التكرم بالالتزام بموعد الإخلاء المحدد، وتسليم الوحدة بحالتها المتفق عليها، مع تسوية أي مستحقات مالية قائمة قبل التسليم.',
+    'وتفضلوا بقبول فائق الاحترام والتقدير،',
+  ] };
+}
+function letterForm(contractId) {
+  const c = CACHE.contracts.find((x) => x.id === Number(contractId));
+  if (!c) return;
+  const today = todayStr();
+  openModal(`📄 خطاب للمستأجر: ${esc(c.tenant_name)}`, `
+    <p class="muted">خطاب رسمي للمستأجر — الوحدة ${esc(c.unit_name)} · ${esc(c.property_name)} · القسط الحالي: ${money(c.installment_amount)} (${esc(CYCLE_LABELS[c.cycle] || c.cycle)})</p>
+    <label>نوع الخطاب<select id="ltType">
+      <option value="renewal" selected>نهاية الإيجار وزيادة عند التجديد</option>
+      <option value="increase">زيادة القيمة الإيجارية</option>
+      <option value="eviction">إخلاء الوحدة</option>
+    </select></label>
+    <div id="ltRenewal">
+      <label>تاريخ نهاية الإيجار<input id="ltEnd" type="date" value="${esc(c.end_date || today)}"></label>
+      <label>قيمة الإيجار الجديدة للقسط (${esc(CUR.label)})<input id="ltNewR" type="number" min="0" step="any" placeholder="مثال: 30000"></label>
+    </div>
+    <div id="ltIncrease" class="hidden">
+      <label>قيمة القسط الجديدة (${esc(CUR.label)})<input id="ltNew" type="number" min="0" step="any" placeholder="مثال: 4500"></label>
+      <label>اعتباراً من تاريخ<input id="ltFrom" type="date" value="${esc(today)}"></label>
+    </div>
+    <div id="ltEviction" class="hidden">
+      <label>تاريخ الإخلاء (آخر موعد)<input id="ltDate" type="date" value="${esc(c.end_date || addMonthsStr(today, 1))}"></label>
+      <label>سبب الإخلاء<select id="ltReason">
+        ${Object.entries(LETTER_REASONS).map(([k, v]) => `<option value="${k}">${esc(v.ar)}</option>`).join('')}
+      </select></label>
+    </div>
+    <label>لغة إضافية مع العربية<select id="ltLang">
+      <option value="">العربية فقط</option>
+      <option value="en">English</option>
+      <option value="ur">اردو</option>
+      <option value="bn">বাংলা (بنغالي)</option>
+    </select></label>
+    <div class="form-actions">
+      <button class="btn primary" onclick="showLetter(${c.id})">عرض الخطاب وحفظه</button>
+    </div>
+    <p class="muted" style="font-size:12px">يُحفظ الخطاب تلقائياً عند عرضه — تجده في تبويب «الخطابات».</p>`);
+  $('#ltType').addEventListener('change', (e) => {
+    const v = e.target.value;
+    $('#ltRenewal').classList.toggle('hidden', v !== 'renewal');
+    $('#ltIncrease').classList.toggle('hidden', v !== 'increase');
+    $('#ltEviction').classList.toggle('hidden', v !== 'eviction');
+  });
+}
+// تجميع مستند الخطاب (HTML) من بياناته — للخطاب الجديد والمحفوظ معاً
+function renderLetterDoc(type, lang2, d, s) {
+  const block = (lang) => {
+    const L = letterText(lang, type, d);
+    const dir = (lang === 'en' || lang === 'bn') ? 'ltr' : 'rtl';
+    const align = dir === 'ltr' ? 'left' : 'right';
+    const footer = L.stampRow
+      ? `<div class="letter-stamp-row"><div>${esc(LETTER_STAMP_LABEL[lang] || LETTER_STAMP_LABEL.ar)}: ____________</div><div>${esc(LETTER_SIGN_LABEL[lang] || LETTER_SIGN_LABEL.ar)}: ____________</div></div>`
+      : `<div class="letter-sig">${esc(LETTER_SIG[lang] || LETTER_SIG.ar)}${s.company_name ? `<br>${esc(s.company_name)}` : ''}<br>${esc(LETTER_SIGN_LABEL[lang] || LETTER_SIGN_LABEL.ar)}: ____________</div>`;
+    return `<div dir="${dir}" style="text-align:${align}">
+      <h2>${esc(L.title)}</h2>
+      ${L.paras.map((p) => `<p>${esc(p)}</p>`).join('')}
+      ${footer}
+    </div>`;
+  };
+  const today = todayStr();
+  return `<div class="letter-doc">
+    ${companyHeader(s)}
+    <div class="r-no">التاريخ: ${esc(fmtGregFull(today))} م — الموافق ${esc(fmtHijriFull(today))}</div>
+    ${block('ar')}
+    ${lang2 ? `<hr style="margin:22px 0;border:none;border-top:1.5px dashed #999">${block(lang2)}` : ''}
+  </div>`;
+}
+function letterPlainText(type, lang2, d, s) {
+  const plain = (lang) => { const L = letterText(lang, type, d); return `${L.title}\n\n${L.paras.join('\n\n')}\n${LETTER_SIG[lang] || LETTER_SIG.ar}${s.company_name ? ` — ${s.company_name}` : ''}`; };
+  return plain('ar') + (lang2 ? `\n\n————————\n\n${plain(lang2)}` : '');
+}
+let lastSavedLetterKey = '';
+async function showLetter(contractId) {
+  const c = CACHE.contracts.find((x) => x.id === Number(contractId));
+  if (!c) return;
+  const t = CACHE.tenants.find((x) => x.id === c.tenant_id) || {};
+  const s = CACHE.settings || {};
+  const type = $('#ltType').value;
+  const lang2 = $('#ltLang').value;
+  const fmtN = (n) => Number(n || 0).toLocaleString('en-US');
+  const prop = (CACHE.properties || []).find((p) => p.id === c.property_id) || {};
+  const newVal = type === 'renewal' ? $('#ltNewR').value : (type === 'increase' ? $('#ltNew').value : '');
+  if ((type === 'renewal' || type === 'increase') && !(Number(newVal) > 0)) { alert('من فضلك أدخل قيمة الإيجار الجديدة أولاً'); return; }
+  const d = {
+    tenantName: c.tenant_name, unitName: c.unit_name, propertyName: c.property_name,
+    ownerName: prop.owner_name || '', company: s.company_name || 'سليمان الحصين للعقارات',
+    cycle: c.cycle, oldAmount: fmtN(c.installment_amount), newAmount: fmtN(newVal),
+    endDate: fmtGregFull($('#ltEnd') ? $('#ltEnd').value : ''),
+    effDate: fmtGregFull($('#ltFrom') ? $('#ltFrom').value : ''),
+    vacateDate: fmtGregFull($('#ltDate') ? $('#ltDate').value : ''),
+    reasonKey: $('#ltReason') ? $('#ltReason').value : 'other',
+  };
+  const doc = renderLetterDoc(type, lang2, d, s);
+  const waText = letterPlainText(type, lang2, d, s);
+  // الحفظ التلقائي (مرة واحدة لنفس البيانات) — طلب عبده: حفظ الخطابات للرجوع لها
+  const key = `${c.id}|${type}|${lang2}|${JSON.stringify(d)}`;
+  let savedNote = '';
+  if (key !== lastSavedLetterKey) {
+    try {
+      const row = await api('/api/letters', { method: 'POST', body: JSON.stringify({ tenant_id: c.tenant_id, contract_id: c.id, type, lang2, data: JSON.stringify(d), text: waText }) });
+      lastSavedLetterKey = key;
+      savedNote = `<p class="muted" style="font-size:12px">✅ حُفظ الخطاب برقم ${row.id} — تجده في تبويب «الخطابات».</p>`;
+    } catch (e) { savedNote = '<p class="error" style="font-size:12px">تعذّر حفظ الخطاب (ظهر لك للطباعة والإرسال فقط).</p>'; }
+  }
+  const waBtn = t.phone ? `<a class="btn" style="text-align:center;text-decoration:none;line-height:2" href="${reminderLink(t.phone, waText)}" target="_blank" rel="noopener">💬 إرسال واتساب</a>` : '';
+  openModal(LETTER_TYPE_LABELS[type] || 'خطاب للمستأجر', doc + `
+    <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>${waBtn}</div>${savedNote}`);
+  $('#printArea').innerHTML = doc;
+}
+// ---------------- الخطابات المحفوظة ----------------
+async function viewLetters() {
+  await refreshCache();
+  const rows = await api('/api/letters');
+  const sorted = [...rows].sort((a, b) => b.id - a.id);
+  const tenantNameOf = (id) => { const x = (CACHE.tenants || []).find((y) => y.id === Number(id)); return x ? x.name : ''; };
+  const unitLabelOf = (cid) => { const cc = (CACHE.contracts || []).find((x) => x.id === Number(cid)); return cc ? `${cc.unit_name} — ${cc.property_name}` : ''; };
+  const langLabel = (l) => ({ en: 'English', ur: 'اردو', bn: 'বাংলা' })[l] || l;
+  main().innerHTML = `
+    <div class="section">
+      <div class="section-head"><h3>📄 الخطابات المحفوظة</h3></div>
+      <p class="muted">كل خطاب تعرضه من ملف مستأجر أو من العقود يُحفظ هنا تلقائياً لتقدر ترجع له وتعيد طباعته أو إرساله.</p>
+      ${sorted.length ? `<div class="table-wrap"><table><tr><th>رقم</th><th>التاريخ</th><th>المستأجر</th><th>الوحدة</th><th>النوع</th><th>لغة إضافية</th><th></th></tr>
+        ${sorted.map((r) => `<tr><td>${r.id}</td><td>${esc(fmtDateTime(r.created_at))}</td>
+          <td><strong>${esc(tenantNameOf(r.tenant_id))}</strong></td>
+          <td>${esc(unitLabelOf(r.contract_id))}</td>
+          <td>${esc(LETTER_TYPE_LABELS[r.type] || r.type)}</td>
+          <td>${r.lang2 ? esc(langLabel(r.lang2)) : '—'}</td>
+          <td><button class="btn small" onclick="showSavedLetter(${r.id})">عرض</button>
+          ${delBtn('letters', r.id, `خطاب رقم ${r.id}`)}</td></tr>`).join('')}</table></div>`
+      : '<p class="muted">لا توجد خطابات محفوظة بعد — اعرض أي خطاب من ملف مستأجر وسيُحفظ هنا.</p>'}
+    </div>`;
+}
+async function showSavedLetter(id) {
+  const r = await api(`/api/letters/${id}`);
+  const s = CACHE.settings || {};
+  let d = {};
+  try { d = JSON.parse(r.data || '{}'); } catch (e) { d = {}; }
+  const doc = renderLetterDoc(r.type, r.lang2 || '', d, s);
+  const t = (CACHE.tenants || []).find((x) => x.id === Number(r.tenant_id)) || {};
+  const waBtn = t.phone && r.text ? `<a class="btn" style="text-align:center;text-decoration:none;line-height:2" href="${reminderLink(t.phone, r.text)}" target="_blank" rel="noopener">💬 إرسال واتساب</a>` : '';
+  openModal(`خطاب محفوظ رقم ${r.id} — ${esc(LETTER_TYPE_LABELS[r.type] || '')}`, doc + `
+    <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>${waBtn}</div>`);
+  $('#printArea').innerHTML = doc;
+}
+
+// ---------------- نهاية خطابات الزيادة والإخلاء ----------------
+
 async function tenantProfile(id) {
   const p = await api(`/api/tenants/${id}/profile`);
   openModal(`ملف المستأجر: ${p.tenant.name}`, `
@@ -860,6 +1118,7 @@ async function tenantProfile(id) {
       المدفوع: ${money(c.total_paid)} · المستحق: ${money(c.total_due)} · المتأخرات: <span class="${c.arrears > 0 ? 'arrears' : ''}">${money(c.arrears)}</span>
       <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn small primary" onclick="closeModal();paymentForm(${c.id})">+ سند قبض لهذا العقد</button>
       <button class="btn small" onclick="showTenantStatement(${c.id})">كشف حساب</button>
+      <button class="btn small" onclick="letterForm(${c.id})">📄 خطاب زيادة/إخلاء</button>
       <button class="btn small" onclick="printLease(${c.id})">طباعة العقد</button>
       <button class="btn small" onclick="showAttachments('contract', ${c.id}, 'العقد')">📎 مرفقات العقد</button></div></div>`).join('') : '<p class="muted">لا توجد عقود.</p>'}
     <h4>سجل الدفعات الكامل</h4>
@@ -895,6 +1154,7 @@ async function viewContracts() {
           <td><button class="btn small primary" onclick="paymentForm(${c.id})">+ سند</button>
           <button class="btn small" onclick="renewContract(${c.id})">🔄 تجديد</button>
           <button class="btn small" onclick="showTenantStatement(${c.id})">كشف حساب</button>
+          <button class="btn small" onclick="letterForm(${c.id})">📄 خطاب</button>
           <button class="btn small" onclick="printLease(${c.id})">طباعة العقد</button>
           <button class="btn small" onclick="showAttachments('contract', ${c.id}, 'العقد')">📎</button>
           <button class="btn small" onclick="contractForm(${c.id})">تعديل</button>
@@ -2107,7 +2367,7 @@ function fmtDateTime(iso) {
     hour: '2-digit', minute: '2-digit', hour12: true,
   }).format(d);
 }
-const AUDIT_ENTITY_LABELS = { payments: 'سندات القبض', expenses: 'المصروفات وسندات الصرف', contracts: 'العقود', tenants: 'المستأجرون', properties: 'العقارات', units: 'الوحدات', meter_readings: 'قراءات العدادات', settings: 'الإعدادات', users: 'المستخدمون', backups: 'النسخ الاحتياطية' };
+const AUDIT_ENTITY_LABELS = { payments: 'سندات القبض', expenses: 'المصروفات وسندات الصرف', contracts: 'العقود', tenants: 'المستأجرون', properties: 'العقارات', units: 'الوحدات', meter_readings: 'قراءات العدادات', settings: 'الإعدادات', users: 'المستخدمون', backups: 'النسخ الاحتياطية', letters: 'الخطابات' };
 const AUDIT_ACTION_LABELS = { create: 'إضافة', update: 'تعديل', delete: 'حذف', restore: 'استعادة' };
 async function viewAudit() {
   main().innerHTML = `

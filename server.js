@@ -295,6 +295,12 @@ async function buildAuditSummary(entity, action, row) {
     if (entity === 'meter_readings') return `${verb} قراءة عداد للوحدة رقم ${r.unit_id ?? ''}`;
     if (entity === 'settings') return 'تعديل إعدادات المؤسسة';
     if (entity === 'listings') return `${verb} إعلان: ${r.title || `رقم ${r.id}`}${r.status ? ` (${LISTING_STATUS_AR[r.status] || r.status})` : ''}`;
+    if (entity === 'letters') {
+      const typeLabel = { renewal: 'نهاية إيجار وزيادة', increase: 'زيادة إيجار', eviction: 'إخلاء' }[r.type] || r.type || '';
+      let tenantName = '';
+      if (r.tenant_id) { const t = await db.get('tenants', r.tenant_id); if (t) tenantName = t.name; }
+      return `${verb} خطاب ${typeLabel}${tenantName ? ` للمستأجر ${tenantName}` : ''}`;
+    }
     if (entity === 'users') return `${verb} حساب مستخدم: ${r.display_name || r.username || `رقم ${r.id}`}${r.role ? ` (${r.role === 'admin' ? 'مدير' : 'موظف'})` : ''}`;
     if (entity === 'backups') {
       if (action === 'restore') return `استعادة النسخة الاحتياطية رقم ${r.id ?? ''}`;
@@ -369,6 +375,7 @@ for (const table of Object.keys(db.TABLES)) {
       try {
         const body = { ...(req.body || {}) };
         if (table === 'expenses') body.created_by = actorOf(req); // «أصدره» على سند الصرف
+        if (table === 'letters') body.created_by = actorOf(req); // مُصدر الخطاب
         const row = await db.insert(table, body);
         await audit(req, table, row.id, 'create', row);
         await takeSnapshot('auto');
