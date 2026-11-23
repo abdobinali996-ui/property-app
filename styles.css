@@ -84,6 +84,7 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 /* الطباعة */
 #printArea { display: none; }
 @page { size: A4; margin: 7mm; }
+@page letterPage { size: A4; margin: 5mm; }
 @media print {
   /* إصلاح الورقة الفاضية (تحديث 40): إخفاء واجهة التطبيق بـ display:none بدل
      visibility، حتى لا تُحجز صفحات فارغة بارتفاع صفحة التطبيق الطويلة */
@@ -106,6 +107,28 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
   .receipt-doc .receipt-verify .qr-box svg, .receipt-doc .receipt-verify .qr-box div { width: 70px !important; height: 70px !important; }
   .receipt-doc .receipt-verify .verify-note { font-size: 12px; line-height: 1.6; }
   .receipt-doc .signatures { margin-top: 4px; font-size: 12.5px; }
+  /* الخطابات: صفحة واحدة حتى مع كذا لغة — لوجو أصغر وضغط مسافات في الطباعة فقط */
+  .letter-doc { font-size: 10.8px; line-height: 1.5; }
+  .letter-doc .company-header { padding-bottom: 3px; margin-bottom: 4px; }
+  .letter-doc .company-header div { line-height: 1.25; font-size: 11px; }
+  .letter-doc .company-header .company-name { font-size: 14px; }
+  .letter-doc .company-header .company-logo { max-height: 40px; margin-bottom: 2px; }
+  .letter-doc h2 { font-size: 13.5px; margin: 3px 0 4px; }
+  .letter-doc p { margin: 3px 0; }
+  .letter-doc .r-no { margin-bottom: 4px; font-size: 11px; }
+  .letter-doc hr { margin: 5px 0 !important; }
+  .letter-doc .letter-sig { margin-top: 8px; line-height: 1.5; }
+  .letter-doc .letter-stamp-row { margin-top: 10px; }
+  .letter-doc { page: letterPage; }
+  /* ٣ لغات فأكثر: ضغط إضافي حتى يبقى الخطاب صفحة واحدة */
+  .letter-doc.letter-many { font-size: 9.6px; line-height: 1.42; }
+  .letter-doc.letter-many .company-header .company-logo { max-height: 32px; }
+  .letter-doc.letter-many .company-header .company-name { font-size: 13px; }
+  .letter-doc.letter-many h2 { font-size: 12.5px; margin: 2px 0 3px; }
+  .letter-doc.letter-many p { margin: 2px 0; }
+  .letter-doc.letter-many hr { margin: 4px 0 !important; }
+  .letter-doc.letter-many .letter-sig { margin-top: 6px; }
+  .letter-doc.letter-many .letter-stamp-row { margin-top: 8px; }
 }
 .company-header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 14px; }
 .company-header div { font-size: 13px; color: #444; line-height: 1.7; }
@@ -131,8 +154,9 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 .letter-doc h2 { text-align: center; margin: 6px 0 14px; }
 .letter-doc p { margin: 0 0 10px; }
 .letter-doc .r-no { text-align: left; color: #555; margin-bottom: 10px; }
-.letter-sig { margin-top: 26px; line-height: 1.9; }
-.letter-stamp-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 30px; flex-wrap: wrap; }
+.letter-sig { margin-top: 26px; line-height: 1.9; text-align: left; }
+.letter-stamp-row { display: flex; direction: ltr; justify-content: flex-start; gap: 56px; margin-top: 30px; flex-wrap: wrap; }
+.letter-doc .company-logo { max-height: 90px; }
 .statement-doc { max-width: 800px; margin: 0 auto; direction: rtl; }
 .statement-doc h2 { text-align: center; }
 .statement-doc table td, .statement-doc table th { border: 1px solid #ccc; padding: 6px; }

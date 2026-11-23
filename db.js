@@ -13,7 +13,7 @@ const TABLES = {
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
   listings: ['title', 'kind', 'price', 'area_name', 'size_m2', 'rooms', 'baths', 'floor', 'description', 'owner_name', 'phone', 'status', 'featured', 'views', 'wa_clicks'],
-  letters: ['tenant_id', 'contract_id', 'type', 'lang2', 'data', 'text', 'created_by'],
+  letters: ['tenant_id', 'contract_id', 'type', 'lang2', 'data', 'text', 'created_by', 'archived'],
 };
 
 const ATTACHMENT_TYPES = ['tenant', 'contract', 'payment', 'expense', 'listing'];
@@ -134,7 +134,9 @@ CREATE INDEX IF NOT EXISTS listings_status_idx ON listings(status);
 CREATE TABLE IF NOT EXISTS letters (
   id SERIAL PRIMARY KEY, tenant_id INTEGER, contract_id INTEGER,
   type TEXT NOT NULL DEFAULT '', lang2 TEXT DEFAULT '', data TEXT DEFAULT '', text TEXT DEFAULT '',
-  created_by TEXT DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+  created_by TEXT DEFAULT '', archived BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE letters ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
 `;
 
 // ---------------- مخزن JSON المحلي ----------------
@@ -267,6 +269,9 @@ async function insert(table, obj) {
     if (data.featured === undefined) data.featured = false;
     if (data.views === undefined) data.views = 0;
     if (data.wa_clicks === undefined) data.wa_clicks = 0;
+  }
+  if (table === 'letters') {
+    if (data.archived === undefined) data.archived = false;
   }
   const row = { id: ++m.seq[table], created_at: new Date().toISOString(), ...data };
   m[table].push(row);
