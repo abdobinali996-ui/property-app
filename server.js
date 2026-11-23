@@ -249,6 +249,11 @@ async function enrichedContracts() {
       tenant_name: (tenantById[c.tenant_id] || {}).name || '',
       start_date: calc.fmtDate(c.start_date), end_date: calc.fmtDate(c.end_date) || null,
       ...summary,
+      // ملخص العقد يعيد rent_amount كمجموع الأقساط المخلوطة عند وجود زيادة
+      // مجدولة (تحديث 48) — لكن العميل يحتاج مبلغ العقد الأصلي كما هو في
+      // قاعدة البيانات (نموذج التعديل/التجديد/الخطابات)، والمجموع المخلوط
+      // متاح أصلاً في contract_total (تحديث 53)
+      rent_amount: Number(c.rent_amount) || 0,
     };
   });
 }

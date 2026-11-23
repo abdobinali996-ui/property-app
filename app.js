@@ -1290,7 +1290,14 @@ function contractForm(id, prefill) {
       </span></label>
     </div>
     <label>إجمالي إيجار العقد (لكامل المدة) (${CUR.label}) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
-    ${c.applied_increase_from ? `<p class="muted" style="margin:-6px 0 10px">📈 طُبّقت الزيادة المجدولة من خطاب الزيادة: الإجمالي كان ${money(c.applied_increase_from)} سنوياً وأصبح ${money(c.rent_amount)} سنوياً اعتباراً من ${esc(fmtGregFull(c.applied_increase_eff))} — عدّله لو اتفقت على مبلغ مختلف.</p>` : ''}
+    ${c.increase_amount ? `<div style="margin:-4px 0 10px">
+      <div class="muted" style="margin-bottom:6px">مبلغ العقد الجديد — اختر جاهزاً أو اكتب مبلغاً آخر بنفسك في الخانة اللي فوق (من خطاب الزيادة: ${money(c.increase_amount)} سنوياً اعتباراً من ${esc(fmtGregFull(c.increase_eff))}):</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="chip rent-choice" data-rent-choice="${c.prev_amount}">نفس السابق: ${money(c.prev_amount)}</button>
+        <button type="button" class="chip rent-choice" data-rent-choice="${c.increase_amount}">مبلغ الزيادة المُبلَّغ: ${money(c.increase_amount)}</button>
+        <button type="button" class="chip rent-choice" data-rent-choice="custom">مبلغ آخر — اكتبه بنفسك</button>
+      </div>
+    </div>` : ''}
     <label>دورة السداد — المستأجر يدفع كل قد إيه؟</label>
     <div class="chips" id="ctCycleChips">${[['monthly', 'شهري'], ['quarterly', 'ربع سنوي'], ['semiannual', 'كل 6 شهور'], ['annual', 'سنوي']].map(([v, l]) => `<button type="button" class="chip cycle-chip${(c.cycle || 'monthly') === v ? ' active' : ''}" data-cycle="${v}">${l}</button>`).join('')}</div>
     <input type="hidden" name="cycle" value="${c.cycle || 'monthly'}">
@@ -1424,6 +1431,23 @@ function contractForm(id, prefill) {
       cycleEl.value = btn.dataset.cycle;
       cycleEl.dispatchEvent(new Event('change'));
     }));
+    // اختيار مبلغ التجديد (تحديث 53): نفس السابق / مبلغ الزيادة المُبلَّغ / مبلغ آخر يدوي
+    const rentChoices = form.querySelectorAll('.rent-choice');
+    if (rentChoices.length) {
+      const markChoice = () => {
+        const v = Number(rentEl.value) || 0;
+        let matched = false;
+        rentChoices.forEach((b) => { if (b.dataset.rentChoice !== 'custom' && Number(b.dataset.rentChoice) === v) matched = true; });
+        rentChoices.forEach((b) => b.classList.toggle('active', b.dataset.rentChoice === 'custom' ? !matched : Number(b.dataset.rentChoice) === v));
+      };
+      rentChoices.forEach((btn) => btn.addEventListener('click', () => {
+        if (btn.dataset.rentChoice === 'custom') { rentEl.focus(); rentEl.select(); }
+        else { rentEl.value = btn.dataset.rentChoice; rentEl.dispatchEvent(new Event('input')); }
+        markChoice();
+      }));
+      rentEl.addEventListener('input', markChoice);
+      markChoice();
+    }
     calSel.addEventListener('change', onDates);
     rentEl.addEventListener('input', refreshHint);
     countEl.addEventListener('input', () => { countTouched = true; refreshHint(); });
@@ -1505,11 +1529,20 @@ function renewalPrefill(c) {
   }
   // زيادة مجدولة من خطاب زيادة (تحديث 48) تاريخ سريانها وصل أو عدى مع بداية
   // العقد الجديد: تصبح هي إجمالي الإيجار الجديد بدل نسخ المبلغ القديم
-  // (تحديث 52 — حالة محمد موب عالم: زيادة 10,000 من 2027-03-18)
-  if (c.increase_new_annual && c.increase_eff_date && out.start_date && c.increase_eff_date <= out.start_date) {
+  // (تحديث 52 — حالة محمد موب عالم: زيادة 10,000 من 2027-03-18).
+  // تنبيه: increase_eff_date يصل من قاعدة البيانات بصيغة تاريخ كاملة
+  // (2027-03-18T00:00:00.000Z) — لازم يُقصّ لأول 10 أحرف قبل المقارنة وإلا
+  // تفشل المقارنة النصية بصمت (سبب عدم تطبيق 52 على جهاز عبده).
+  // تحديث 53: نمرّر المبلغين للنموذج ليعرض خيارات (السابق / الزيادة / آخر).
+  const incAmt = Number(c.increase_new_annual) || 0;
+  const incEff = c.increase_eff_date ? String(c.increase_eff_date).slice(0, 10) : '';
+  if (incAmt > 0 && incEff && out.start_date && incEff <= out.start_date) {
+    out.prev_amount = c.rent_amount;
+    out.increase_amount = incAmt;
+    out.increase_eff = incEff;
     out.applied_increase_from = c.rent_amount;
-    out.applied_increase_eff = c.increase_eff_date;
-    out.rent_amount = Number(c.increase_new_annual);
+    out.applied_increase_eff = incEff;
+    out.rent_amount = incAmt;
   }
   return out;
 }
