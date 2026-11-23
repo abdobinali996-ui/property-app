@@ -1290,6 +1290,7 @@ function contractForm(id, prefill) {
       </span></label>
     </div>
     <label>إجمالي إيجار العقد (لكامل المدة) (${CUR.label}) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
+    ${c.applied_increase_from ? `<p class="muted" style="margin:-6px 0 10px">📈 طُبّقت الزيادة المجدولة من خطاب الزيادة: الإجمالي كان ${money(c.applied_increase_from)} سنوياً وأصبح ${money(c.rent_amount)} سنوياً اعتباراً من ${esc(fmtGregFull(c.applied_increase_eff))} — عدّله لو اتفقت على مبلغ مختلف.</p>` : ''}
     <label>دورة السداد — المستأجر يدفع كل قد إيه؟</label>
     <div class="chips" id="ctCycleChips">${[['monthly', 'شهري'], ['quarterly', 'ربع سنوي'], ['semiannual', 'كل 6 شهور'], ['annual', 'سنوي']].map(([v, l]) => `<button type="button" class="chip cycle-chip${(c.cycle || 'monthly') === v ? ' active' : ''}" data-cycle="${v}">${l}</button>`).join('')}</div>
     <input type="hidden" name="cycle" value="${c.cycle || 'monthly'}">
@@ -1501,6 +1502,14 @@ function renewalPrefill(c) {
   } else {
     out.start_date = todayStr();
     out.end_date = '';
+  }
+  // زيادة مجدولة من خطاب زيادة (تحديث 48) تاريخ سريانها وصل أو عدى مع بداية
+  // العقد الجديد: تصبح هي إجمالي الإيجار الجديد بدل نسخ المبلغ القديم
+  // (تحديث 52 — حالة محمد موب عالم: زيادة 10,000 من 2027-03-18)
+  if (c.increase_new_annual && c.increase_eff_date && out.start_date && c.increase_eff_date <= out.start_date) {
+    out.applied_increase_from = c.rent_amount;
+    out.applied_increase_eff = c.increase_eff_date;
+    out.rent_amount = Number(c.increase_new_annual);
   }
   return out;
 }
