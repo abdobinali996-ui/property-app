@@ -396,7 +396,7 @@ $('#globalSearchTop').addEventListener('keydown', (e) => {
   else go('dashboard');
 });
 async function render() {
-  const views = { dashboard: viewDashboard, properties: viewProperties, units: viewUnits, tenants: viewTenants, contracts: viewContracts, payments: viewPayments, expenses: viewExpenses, vouchers: viewVouchers, statement: viewStatement, owners: viewOwners, monthly: viewMonthly, reports: viewReports, listings: viewListings, letters: viewLetters, audit: viewAudit, users: viewUsers, backup: viewBackup, settings: viewSettings };
+  const views = { dashboard: viewDashboard, properties: viewProperties, units: viewUnits, tenants: viewTenants, contracts: viewContracts, payments: viewPayments, deposits: viewDeposits, expenses: viewExpenses, vouchers: viewVouchers, statement: viewStatement, owners: viewOwners, monthly: viewMonthly, reports: viewReports, listings: viewListings, letters: viewLetters, audit: viewAudit, users: viewUsers, backup: viewBackup, settings: viewSettings };
   main().innerHTML = '<p class="muted">جارٍ التحميل…</p>';
   try { await views[currentView](); } catch (e) { main().innerHTML = `<p class="error">${esc(e.message)}</p>`; }
 }
@@ -1653,7 +1653,7 @@ async function viewPayments() {
         ? `<button class="btn small" onclick="sendReceiptWhatsApp(${p.id})">📤 واتساب</button>`
         : `<button class="btn small" disabled title="لا يوجد رقم جوال مسجل لهذا المستأجر — أضف الرقم من ملف المستأجر أولاً">📤 واتساب</button>`; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong>${p.edit_count ? ' <span class="badge">معدّل</span>' : ''}</td><td>${esc(String(p.payment_date).slice(0, 10))}${issuedTimeHM(p.created_at) ? `<div class="muted" style="font-size:11px">🕐 ${esc(issuedTimeHM(p.created_at))}</div>` : ''}</td>
         <td class="muted" style="white-space:nowrap;font-size:12px">${p.period_from ? `${esc(String(p.period_from).slice(0, 10))} – ${esc(String(p.period_to || '').slice(0, 10))}` : '—'}</td>
-        <td>${p.contract_id ? esc(c.tenant_name || '') : `${esc(p.payer_name || '')} <span class="badge">تصفية — بدون عقد</span>`}</td><td>${p.contract_id ? esc(c.unit_name || '') : esc((CACHE.properties.find((pr) => pr.id === p.property_id) || {}).name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
+        <td>${p.contract_id ? esc(c.tenant_name || '') : `${esc(p.payer_name || '')} <span class="badge">${(p.purpose || '') === 'عربون' ? 'عربون — بدون عقد' : 'تصفية — بدون عقد'}</span>`}</td><td>${p.contract_id ? esc(c.unit_name || '') : esc((CACHE.properties.find((pr) => pr.id === p.property_id) || {}).name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
         <td><button class="btn small" onclick="showReceipt(${p.id})">عرض/طباعة</button>
         <button class="btn small" onclick="editPayment(${p.id})">تعديل</button>
         ${waBtn}
@@ -1692,6 +1692,98 @@ async function restorePayment(id) {
   await api(`/api/payments/${id}/restore`, { method: 'POST' });
   trashOpen = false;
   render();
+}
+
+// ---------------- العربون (تحديث 60 — بطلب عبده: «خانة العربون لوحده») ----------------
+// تبويب مستقل لمبالغ الحجز بلا عقود: القائمة تُظهر «استلمت من مين» وبكم
+// ومتى وعلى أي عقار/وحدة، وزر الاستلام يفتح نموذجاً خاصاً بسيطاً.
+async function viewDeposits() {
+  await refreshCache();
+  const payments = await api('/api/payments');
+  const list = payments
+    .filter((p) => (p.purpose || 'إيجار') === 'عربون')
+    .sort((a, b) => (b.receipt_no || 0) - (a.receipt_no || 0));
+  const total = list.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const propName = (id) => (CACHE.properties.find((pr) => pr.id === id) || {}).name || '';
+  const unitName = (id) => (CACHE.units.find((u) => u.id === id) || {}).name || '';
+  main().innerHTML = `
+    <div class="section">
+      <div class="section-head"><h3>العربون — مبالغ حجز بلا عقود</h3><button class="btn primary" onclick="depositForm()">+ استلام عربون</button></div>
+      <p class="muted">كل عربون استلمته محفوظ هنا بسنده: استلمت من مين، وبكم، ومتى، وعلى أي عقار أو وحدة. العربون مبلغ حجز معلّق — لا يدخل في كشوف الملاك ولا في محصّل الشهر ولا الملخص الشهري.</p>
+      <div class="cards">
+        <div class="card"><div class="lbl">إجمالي العربون المستلم</div><div class="num">${money(total)}</div></div>
+        <div class="card"><div class="lbl">عدد سندات العربون</div><div class="num">${list.length}</div></div>
+      </div>
+      <div id="depTable" style="margin-top:12px"></div>
+    </div>`;
+  $('#depTable').innerHTML = list.length ? `<div class="table-wrap"><table><tr><th>رقم السند</th><th>التاريخ</th><th>استلمت من</th><th>العقار / الوحدة</th><th>المبلغ</th><th>الطريقة</th><th></th></tr>
+    ${list.map((p) => `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong>${p.edit_count ? ' <span class="badge">معدّل</span>' : ''}</td><td>${esc(String(p.payment_date).slice(0, 10))}</td><td>${esc(p.payer_name || '')}</td><td>${esc([propName(p.property_id), unitName(p.unit_id)].filter(Boolean).join(' — '))}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
+      <td><button class="btn small" onclick="showReceipt(${p.id})">عرض/طباعة</button>
+      <button class="btn small" onclick="editDeposit(${p.id})">تعديل</button>
+      ${delBtn('payments', p.id, `سند عربون ${String(p.receipt_no).padStart(4, '0')} — سيُنقل إلى السندات المحذوفة ويمكن استرجاعه`)}</td></tr>`).join('')}</table></div>`
+    : '<p class="muted">لا توجد مبالغ عربون مسجلة بعد — دوس «+ استلام عربون» عند أول حجز.</p>';
+}
+
+async function editDeposit(id) {
+  try {
+    const p = await api(`/api/payments/${id}`);
+    depositForm(p);
+  } catch (e) { alert(e.message); }
+}
+
+// نموذج استلام عربون: من مين، بكم، متى، وبأي طريقة — والعقار/الوحدة اختياريان
+async function depositForm(editPayment = null) {
+  await refreshCache();
+  formModal(editPayment ? `تعديل عربون — سند رقم ${String(editPayment.receipt_no || '').padStart(4, '0')}` : 'استلام عربون', `
+    <label>استلمت من *<input name="payer_name" id="depPayer" value="${editPayment ? esc(editPayment.payer_name || '') : ''}" placeholder="اسم من دفع العربون"></label>
+    <label>المبلغ (${CUR.label}) *<input name="amount" type="number" step="0.01" min="0.01" required value="${editPayment ? editPayment.amount : ''}"></label>
+    <label>تاريخ الاستلام<input name="payment_date" type="date" value="${editPayment ? String(editPayment.payment_date).slice(0, 10) : todayStr()}"></label>
+    <label>العقار (اختياري)<select name="property_id" id="depProp"><option value="">— بدون عقار —</option>${CACHE.properties.map((pr) => `<option value="${pr.id}" ${editPayment && editPayment.property_id === pr.id ? 'selected' : ''}>${esc(pr.name)}</option>`).join('')}</select></label>
+    <label>الوحدة (اختياري — وحدة الحجز)<select name="unit_id" id="depUnit"><option value="">— بدون وحدة —</option></select></label>
+    <label>طريقة الدفع<select name="method" id="depMethod">${PAY_METHODS.map((m) => `<option ${editPayment && editPayment.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+    <label id="depMethodDateWrap" class="hidden">تاريخ العملية (التحويل / الشيك / المنصة)<input name="method_date" id="depMethodDate" type="date" value="${editPayment && editPayment.method_date ? String(editPayment.method_date).slice(0, 10) : ''}"><span class="muted" style="display:block;font-weight:normal">إن اختلف تاريخ التحويل أو الشيك أو المنصة عن تاريخ السند اكتبه هنا — واتركه فارغاً إن كان نفسه.</span></label>
+    <label>ملاحظات<input name="notes" value="${esc(editPayment ? (editPayment.notes || '') : '')}"></label>`,
+    async (data) => {
+      const payer = String(data.payer_name || '').trim();
+      if (!payer) throw new Error('اكتب اسم من دفع العربون — خانة «استلمت من» إلزامية');
+      const payload = {
+        contract_id: null, purpose: 'عربون', payer_name: payer,
+        amount: Number(data.amount), payment_date: data.payment_date,
+        method: data.method,
+        method_date: METHODS_WITH_DATE.includes(data.method) ? (data.method_date || null) : null,
+        property_id: data.property_id ? Number(data.property_id) : null,
+        unit_id: data.unit_id ? Number(data.unit_id) : null,
+        notes: data.notes || '',
+      };
+      if (editPayment) {
+        await api(`/api/payments/${editPayment.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        render();
+        setTimeout(() => showReceipt(editPayment.id), 80);
+      } else {
+        const p = await api('/api/payments', { method: 'POST', body: JSON.stringify(payload) });
+        render();
+        setTimeout(() => showReceipt(p.id, true), 80);
+      }
+    }, editPayment ? 'حفظ التعديل' : 'حفظ وإصدار السند');
+  const form = document.getElementById('modalForm');
+  if (form) {
+    const propEl = document.getElementById('depProp');
+    const unitEl = document.getElementById('depUnit');
+    const fillUnits = () => {
+      const pid = propEl.value ? Number(propEl.value) : null;
+      const cur = unitEl.value || (editPayment && editPayment.unit_id ? String(editPayment.unit_id) : '');
+      unitEl.innerHTML = '<option value="">— بدون وحدة —</option>' + CACHE.units
+        .filter((u) => !pid || u.property_id === pid)
+        .map((u) => `<option value="${u.id}" ${String(u.id) === cur ? 'selected' : ''}>${esc(u.name)}${pid ? '' : ' — ' + esc((CACHE.properties.find((pr) => pr.id === u.property_id) || {}).name || '')}</option>`).join('');
+    };
+    if (propEl) propEl.addEventListener('change', fillUnits);
+    fillUnits();
+    const methodEl = document.getElementById('depMethod');
+    const mdWrap = document.getElementById('depMethodDateWrap');
+    const syncMd = () => { if (methodEl && mdWrap) mdWrap.classList.toggle('hidden', !METHODS_WITH_DATE.includes(methodEl.value)); };
+    if (methodEl) methodEl.addEventListener('change', syncMd);
+    syncMd();
+  }
 }
 
 function addDaysStr(dateStr, n) {
@@ -1733,6 +1825,8 @@ function defaultPeriodClient(contract, paymentDateStr) {
 }
 
 async function paymentForm(contractId, presetAmount, editPayment = null) {
+  // سندات العربون تُحرَّر من نموذجها الخاص في تبويب العربون (تحديث 60)
+  if (editPayment && (editPayment.purpose || 'إيجار') === 'عربون') return depositForm(editPayment);
   await refreshCache();
   const active = CACHE.contracts.filter((c) => c.status === 'active');
   const pool = editPayment ? CACHE.contracts : active;
@@ -2083,7 +2177,7 @@ async function showReceipt(paymentId, justCreated = false) {
       ${issuedAtLine(p.created_at, p.payment_date)}
       ${p.edit_count ? `<div class="doc-stamp">نسخة معدّلة${p.edited_at ? ` — آخر تعديل: ${esc(String(p.edited_at).slice(0, 10))}` : ''}</div>` : ''}
       ${p.deleted_at ? `<div class="doc-stamp deleted">سند محذوف — للاطلاع فقط</div>` : ''}
-      ${!r.contract ? `<div class="doc-stamp">تصفية إيجار — بدون عقد</div>` : ''}
+      ${!r.contract ? `<div class="doc-stamp">${(p.purpose || '') === 'عربون' ? 'عربون حجز — بدون عقد' : 'تصفية إيجار — بدون عقد'}</div>` : ''}
       <table>
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
