@@ -518,6 +518,19 @@ app.post('/api/payments', auth, async (req, res) => {
       if (!prop) return res.status(400).json({ error: 'العقار المختار غير موجود' });
       settlePropertyId = prop.id;
     }
+    // وحدة الحجز الاختيارية (تحديث 60 — للعربون غالباً): يجب أن توجد،
+    // وعقارها يُستنتج منها إن لم يُختر، ويطابق العقار المختار إن اختير الاثنان
+    const ncPurpose = body.purpose === 'عربون' ? 'عربون' : 'تصفية إيجار';
+    let settleUnitId = null;
+    if (noContract && body.unit_id) {
+      const unit = await db.get('units', Number(body.unit_id));
+      if (!unit) return res.status(400).json({ error: 'الوحدة المختارة غير موجودة' });
+      settleUnitId = unit.id;
+      if (settlePropertyId == null) settlePropertyId = unit.property_id;
+      else if (settlePropertyId !== unit.property_id) {
+        return res.status(400).json({ error: 'الوحدة المختارة لا تتبع العقار المختار' });
+      }
+    }
     const paymentDate = body.payment_date || calc.fmtDate(new Date());
     // تاريخ العملية (تحديث 56 — بطلب عبده): تاريخ التحويل/الشيك/المنصة إن
     // اختلف عن تاريخ السند، اختياري ويُخزَّن كما هو بصيغة ISO
@@ -525,8 +538,8 @@ app.post('/api/payments', auth, async (req, res) => {
     if (methodDate && !/^\d{4}-\d{2}-\d{2}$/.test(methodDate)) {
       return res.status(400).json({ error: 'تاريخ التحويل/الشيك/المنصة غير صالح' });
     }
-    const purpose = noContract ? 'تصفية إيجار'
-      : (calc.PAYMENT_PURPOSES.includes(body.purpose) && body.purpose !== 'تصفية إيجار' ? body.purpose : 'إيجار');
+    const purpose = noContract ? ncPurpose
+      : (calc.PAYMENT_PURPOSES.includes(body.purpose) && body.purpose !== 'تصفية إيجار' && body.purpose !== 'عربون' ? body.purpose : 'إيجار');
     const contract = noContract ? null : await db.get('contracts', Number(body.contract_id));
     // رقم القسط الصريح: لدفعات الإيجار فقط وضمن عدد أقساط العقد، وإلا null (تلقائي)
     let installmentNo = null;
@@ -551,6 +564,7 @@ app.post('/api/payments', auth, async (req, res) => {
       contract_id: noContract ? null : Number(body.contract_id),
       payer_name: noContract ? payerName : null,
       property_id: noContract ? settlePropertyId : null,
+      unit_id: noContract ? settleUnitId : null,
       amount: Number(body.amount),
       payment_date: paymentDate,
       method: body.method || 'تحويل',
@@ -597,7 +611,8 @@ app.get('/api/payments/:id/receipt', auth, async (req, res) => {
     if (!payment) return res.status(404).json({ error: 'غير موجود' });
     const contract = payment.contract_id ? await db.get('contracts', payment.contract_id) : null;
     const tenant = contract ? await db.get('tenants', contract.tenant_id) : null;
-    const unit = contract ? await db.get('units', contract.unit_id) : null;
+    const unit = contract ? await db.get('units', contract.unit_id)
+      : (payment.unit_id ? await db.get('units', payment.unit_id) : null);
     // سند تصفية بلا عقد (تحديث 59): العقار من حقل السند نفسه، واسم المستأجر
     // المعروض على السند ورمز QR هو اسم الدافع الحر
     const property = unit ? await db.get('properties', unit.property_id)
@@ -909,6 +924,7 @@ async function ownerStatementData(property, from, to) {
   // إيراد إيجار للمالك بلا عقد — تظهر صفاً وإجمالاً كأي تحصيل على العقار
   for (const p of payments) {
     if (p.contract_id != null || p.property_id !== property.id) continue;
+    if (calc.paymentPurpose(p) !== 'تصفية إيجار') continue; // العربون لا يدخل كشف المالك (تحديث 60)
     const d = calc.fmtDate(p.payment_date);
     if (d < from || d > to) continue;
     incomeRows.push({
@@ -972,10 +988,11 @@ async function ownersData() {
     let collected = 0, expTotal = 0, payouts = 0;
     for (const pay of payments) {
       if (calc.isOfficePayment(pay)) continue;
-      // سند تصفية بلا عقد (تحديث 59): عقاره مأخوذ من حقل السند نفسه
-      const pid = pay.contract_id == null
-        ? (pay.property_id != null ? pay.property_id : null)
-        : propOfContract(contractById.get(pay.contract_id));
+      // سند تصفية بلا عقد (تحديث 59): عقاره مأخوذ من حقل السند نفسه —
+      // والعربون مستثنى: مبلغ حجز معلّق لا يدخل رصيد المالك (تحديث 60)
+      let pid = null;
+      if (pay.contract_id != null) pid = propOfContract(contractById.get(pay.contract_id));
+      else if (calc.paymentPurpose(pay) === 'تصفية إيجار' && pay.property_id != null) pid = pay.property_id;
       if (pid != null && g.property_ids.has(pid)) collected += Number(pay.amount) || 0;
     }
     for (const e of expenses) {
@@ -1399,7 +1416,8 @@ app.get('/api/reports/monthly', auth, async (req, res) => {
     const contractById = Object.fromEntries(contracts.map((c) => [c.id, c]));
     const inMonth = (d) => calc.fmtDate(d).startsWith(month);
 
-    const monthPayments = payments.filter((p) => inMonth(p.payment_date));
+    // العربون مستثنى من الملخص الشهري كله (تحديث 60): مبلغ حجز معلّق لا إيراد
+    const monthPayments = payments.filter((p) => inMonth(p.payment_date) && !calc.isDepositPayment(p));
     const monthExpenses = expenses.filter((e) => inMonth(e.expense_date));
 
     // تجميع حسب العقار: التحصيل عبر عقد ← وحدة ← عقار، والمصروفات بعقارها المباشر
@@ -1413,7 +1431,7 @@ app.get('/api/reports/monthly', auth, async (req, res) => {
       const u = c ? unitById[c.unit_id] : null;
       if (u && u.property_id != null) bucket(u.property_id).collected += Number(p.amount || 0);
       // سند تصفية بلا عقد (تحديث 59): يُنسب لعقاره المباشر إن اختير له عقار
-      else if (p.contract_id == null && p.property_id != null) bucket(p.property_id).collected += Number(p.amount || 0);
+      else if (p.contract_id == null && p.property_id != null && calc.paymentPurpose(p) === 'تصفية إيجار') bucket(p.property_id).collected += Number(p.amount || 0);
     }
     for (const e of monthExpenses) {
       if (e.property_id != null) bucket(e.property_id).expenses += Number(e.amount || 0);
@@ -1797,14 +1815,15 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const payments = await db.list('payments');
     const now = calc.today(); // يوم الرياض — لا يوم الخادم
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    // العربون مستثنى من المحصّلات (تحديث 60): خانته مستقلة بمبالغ حجز معلّقة
     const collectedThisMonth = payments
-      .filter((p) => calc.fmtDate(p.payment_date).startsWith(ym))
+      .filter((p) => !calc.isDepositPayment(p) && calc.fmtDate(p.payment_date).startsWith(ym))
       .reduce((s, p) => s + Number(p.amount || 0), 0);
     // المحصّل هذا العام (تحديث 55 — بطلب عبده): كل سندات قبض السنة الحالية
     // (إيجار + خدمات) حسب تاريخ الدفع وبتوقيت البرنامج، بنفس منطق الشهر
     const yearPrefix = String(now.getFullYear());
     const collectedThisYear = payments
-      .filter((p) => calc.fmtDate(p.payment_date).startsWith(yearPrefix))
+      .filter((p) => !calc.isDepositPayment(p) && calc.fmtDate(p.payment_date).startsWith(yearPrefix))
       .reduce((s, p) => s + Number(p.amount || 0), 0);
     const [rawContracts] = await Promise.all([db.list('contracts')]);
     const arrearsList = contracts
@@ -1893,6 +1912,7 @@ app.get('/api/dashboard', auth, async (req, res) => {
     // تفصيل محصّل هذا الشهر حسب أقسام طريقة الدفع (نقدي/بنك/شيك/منصة بفرعيها/أخرى)
     const perMethodDash = new Map();
     for (const p of payments) {
+      if (calc.isDepositPayment(p)) continue;
       if (!calc.fmtDate(p.payment_date).startsWith(ym)) continue;
       const key = p.method || 'تحويل';
       const b = perMethodDash.get(key) || { total: 0, count: 0 };
@@ -1906,6 +1926,7 @@ app.get('/api/dashboard', auth, async (req, res) => {
     // تفصيل «محصّل هذا العام» حسب أقسام طريقة الدفع — نفس أقسام الشهر
     const perMethodYear = new Map();
     for (const p of payments) {
+      if (calc.isDepositPayment(p)) continue;
       if (!calc.fmtDate(p.payment_date).startsWith(yearPrefix)) continue;
       const key = p.method || 'تحويل';
       const b = perMethodYear.get(key) || { total: 0, count: 0 };
