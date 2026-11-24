@@ -811,6 +811,13 @@ async function viewUnits() {
       : '<p class="muted">لا توجد وحدات بعد.</p>'}
     </div>`;
 }
+// مفتاح مقارنة اسم الوحدة (تحديث 57): مثل السيرفر — مسافات وأرقام موحّدة
+function unitNameKeyF(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ')
+    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+    .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+    .toLowerCase();
+}
 function unitForm(id) {
   const u = id ? CACHE.units.find((x) => x.id === id) : {};
   formModal(id ? 'تعديل وحدة' : 'إضافة وحدة', `
@@ -821,7 +828,12 @@ function unitForm(id) {
     <label>الإيجار الافتراضي (${CUR.label})<input name="default_rent" type="number" step="0.01" min="0" value="${u.default_rent ?? 0}"></label>
     <label>الحالة<select name="status">${['شاغرة', 'مؤجرة', 'صيانة'].map((s) => `<option ${u.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
     <label>ملاحظات<textarea name="notes" rows="2">${esc(u.notes || '')}</textarea></label>`,
-    async (data) => { data.property_id = Number(data.property_id); data.default_rent = Number(data.default_rent || 0); id ? await api(`/api/units/${id}`, { method: 'PUT', body: JSON.stringify(data) }) : await api('/api/units', { method: 'POST', body: JSON.stringify(data) }); render(); });
+    async (data) => { data.property_id = Number(data.property_id); data.default_rent = Number(data.default_rent || 0);
+      // فحص فوري قبل الإرسال (والسيرفر يفرضه أيضاً — تحديث 57)
+      const key = unitNameKeyF(data.name);
+      const dup = (CACHE.units || []).find((x) => Number(x.property_id) === data.property_id && (!id || Number(x.id) !== Number(id)) && unitNameKeyF(x.name) === key);
+      if (dup) throw new Error('هذه الوحدة موجودة بالفعل في نفس العقار');
+      id ? await api(`/api/units/${id}`, { method: 'PUT', body: JSON.stringify(data) }) : await api('/api/units', { method: 'POST', body: JSON.stringify(data) }); render(); });
 }
 
 // ---------------- المستأجرون ----------------

@@ -363,6 +363,26 @@ function queueDriveUpload(backupId, payload, createdAt) {
   }).catch(() => {});
 }
 
+// ---------- منع تكرار الوحدة داخل نفس العقار (تحديث 57) ----------
+// مفتاح مقارنة اسم الوحدة: مسافات زائدة مهملة، والأرقام العربية (٠-٩)
+// والمشرقية (۰-۹) موحّدة مع الإنجليزية، والحروف اللاتينية بلا حساسية حالة
+function unitNameKey(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ')
+    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+    .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+    .toLowerCase();
+}
+// يعيد رسالة خطأ إن وُجدت وحدة بنفس الاسم داخل نفس العقار (عدا excludeId)
+async function duplicateUnitError(propertyId, name, excludeId) {
+  if (propertyId == null || propertyId === '' || !String(name || '').trim()) return null;
+  const key = unitNameKey(name);
+  const units = await db.list('units');
+  const dup = units.find((u) => Number(u.property_id) === Number(propertyId)
+    && (excludeId == null || Number(u.id) !== Number(excludeId))
+    && unitNameKey(u.name) === key);
+  return dup ? 'هذه الوحدة موجودة بالفعل في نفس العقار' : null;
+}
+
 // ---------- CRUD عام ----------
 for (const table of Object.keys(db.TABLES)) {
   app.get(`/api/${table}`, auth, async (req, res) => {
@@ -379,6 +399,10 @@ for (const table of Object.keys(db.TABLES)) {
     app.post(`/api/${table}`, auth, async (req, res) => {
       try {
         const body = { ...(req.body || {}) };
+        if (table === 'units') {
+          const dupErr = await duplicateUnitError(body.property_id, body.name, null);
+          if (dupErr) return res.status(400).json({ error: dupErr });
+        }
         if (table === 'expenses') body.created_by = actorOf(req); // «أصدره» على سند الصرف
         if (table === 'letters') body.created_by = actorOf(req); // مُصدر الخطاب
         const row = await db.insert(table, body);
@@ -392,6 +416,15 @@ for (const table of Object.keys(db.TABLES)) {
   app.put(`/api/${table}/:id`, auth, async (req, res) => {
     try {
       const putBody = req.body || {};
+      if (table === 'units') {
+        // منع التكرار عند التعديل أيضاً: الاسم/العقار الفعّالان بعد التعديل
+        const existingUnit = await db.get('units', req.params.id);
+        if (!existingUnit) return res.status(404).json({ error: 'غير موجود' });
+        const effPid = putBody.property_id !== undefined ? putBody.property_id : existingUnit.property_id;
+        const effName = putBody.name !== undefined ? putBody.name : existingUnit.name;
+        const dupErr = await duplicateUnitError(effPid, effName, req.params.id);
+        if (dupErr) return res.status(400).json({ error: dupErr });
+      }
       if (table === 'payments' && (putBody.period_from !== undefined || putBody.period_to !== undefined)) {
         const existing = await db.get('payments', req.params.id);
         if (!existing) return res.status(404).json({ error: 'غير موجود' });
