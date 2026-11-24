@@ -122,7 +122,7 @@ function round2(x) {
 // «تصفية إيجار» (تحديث 59): سند بلا عقد — تحصيل إيجار فعلي لصالح مالك،
 // لكنه ليس دفعة إيجار على عقد: لا يُنقص أقساطاً ولا متأخرات، ولا هو مال
 // مكتب (ليس «خدمات»)؛ يظهر في كشف مالك العقار المختار وفي المحصّلات.
-const PAYMENT_PURPOSES = ['إيجار', 'خدمات', 'مياه', 'كهرباء', 'أخرى', 'تصفية إيجار'];
+const PAYMENT_PURPOSES = ['إيجار', 'خدمات', 'مياه', 'كهرباء', 'أخرى', 'تصفية إيجار', 'عربون'];
 // غرض «خدمات» يمثّل مال المكتب نفسه (عمولته): يُستبعد كلياً من كشف حساب
 // المالك، ويبقى داخلاً في ملخص المكتب الشهري وفي تقرير السندات.
 const OFFICE_PURPOSE = 'خدمات';
@@ -132,6 +132,9 @@ function paymentPurpose(p) {
 }
 function isRentPayment(p) { return paymentPurpose(p) === 'إيجار'; }
 function isOfficePayment(p) { return paymentPurpose(p) === OFFICE_PURPOSE; }
+// غرض «عربون» (تحديث 60): مبلغ حجز بلا عقد — خانته مستقلة عند عبده، فلا
+// يدخل في محصّلات لوحة المتابعة ولا الملخص الشهري ولا كشوف الملاك.
+function isDepositPayment(p) { return paymentPurpose(p) === 'عربون'; }
 
 // تطبيع اسم المالك للمقارنة والتجميع: قصّ الطرفين + دمج المسافات الداخلية
 // + تجاهل حالة الأحرف اللاتينية. الاسم الفارغ بعد التطبيع = '' (لا يُحتسب).
@@ -476,7 +479,7 @@ module.exports = {
   contractSummary, dueInMonth, installmentInfo, paymentPeriod,
   installmentSchedule, nextUnpaidInstallment, installmentBalance,
   installmentCoverage, installmentBalanceForPayment, installmentPeriod,
-  paymentPurpose, isRentPayment, isOfficePayment, rentPayments, OFFICE_PURPOSE,
+  paymentPurpose, isRentPayment, isOfficePayment, isDepositPayment, rentPayments, OFFICE_PURPOSE,
   openingAmount, openingPayment, scheduledIncrease,
   normalizeOwnerName,
 };
