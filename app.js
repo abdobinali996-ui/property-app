@@ -1343,6 +1343,9 @@ function contractForm(id, prefill) {
         <input id="ceHy" name="ce_h_y" type="number" min="1300" max="1600" placeholder="السنة">
       </span></label>
     </div>
+    <label>مدة العقد — من تاريخ البداية (دي غير دورة السداد)</label>
+    <div class="chips" id="ctDurChips">${[[3, '3 شهور'], [6, '6 شهور'], [12, 'سنة'], [24, 'سنتين']].map(([m, l]) => `<button type="button" class="chip dur-chip" data-months="${m}">${l}</button>`).join('')}</div>
+    <p class="muted" style="margin:-4px 0 10px">اختيار المدة يملأ تاريخ النهاية تلقائياً (البداية + المدة − يوم). وتقدر تعدّل تاريخ النهاية يدوياً في أي وقت.</p>
     <label>إجمالي إيجار العقد (لكامل المدة) (${CUR.label}) *<input name="rent_amount" type="number" step="0.01" min="0" required value="${c.rent_amount ?? ''}"></label>
     ${c.increase_amount ? `<div style="margin:-4px 0 10px">
       <div class="muted" style="margin-bottom:6px">مبلغ العقد الجديد — اختر جاهزاً أو اكتب مبلغاً آخر بنفسك في الخانة اللي فوق (من خطاب الزيادة: ${money(c.increase_amount)} سنوياً اعتباراً من ${esc(fmtGregFull(c.increase_eff))}):</div>
@@ -1485,6 +1488,30 @@ function contractForm(id, prefill) {
       cycleEl.value = btn.dataset.cycle;
       cycleEl.dispatchEvent(new Event('change'));
     }));
+    // أزرار مدة العقد (تحديث 58): تملأ تاريخ النهاية = البداية + المدة − يوم
+    // (بأشهر هجرية لعقد هجري)، وتتفعّل تلقائياً إذا طابقت المدة الحالية خياراً جاهزاً
+    const durChips = form.querySelectorAll('.dur-chip');
+    const durEndFor = (months) => startEl.value ? addDaysStr(stepMonthsStr({ calendar: calSel.value }, startEl.value, months), -1) : '';
+    const markDur = () => {
+      let active = null;
+      if (startEl.value && endEl.value) [3, 6, 12, 24].forEach((m) => { if (durEndFor(m) === endEl.value) active = m; });
+      durChips.forEach((b) => b.classList.toggle('active', Number(b.dataset.months) === active));
+    };
+    durChips.forEach((btn) => btn.addEventListener('click', () => {
+      const endIso = durEndFor(Number(btn.dataset.months));
+      if (!endIso) return;
+      endEl.value = endIso;
+      if (calSel.value === 'hijri') fillHijriFromGreg();
+      onDates();
+      markDur();
+    }));
+    [startEl, endEl].forEach((el) => el.addEventListener('change', markDur));
+    ['csHd', 'csHm', 'csHy', 'ceHd', 'ceHm', 'ceHy'].forEach((hid) => {
+      const el = document.getElementById(hid);
+      if (el) el.addEventListener('change', markDur);
+    });
+    calSel.addEventListener('change', markDur);
+    markDur();
     // اختيار مبلغ التجديد (تحديث 53): نفس السابق / مبلغ الزيادة المُبلَّغ / مبلغ آخر يدوي
     const rentChoices = form.querySelectorAll('.rent-choice');
     if (rentChoices.length) {
