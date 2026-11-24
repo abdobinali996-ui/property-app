@@ -1653,7 +1653,7 @@ async function viewPayments() {
         ? `<button class="btn small" onclick="sendReceiptWhatsApp(${p.id})">📤 واتساب</button>`
         : `<button class="btn small" disabled title="لا يوجد رقم جوال مسجل لهذا المستأجر — أضف الرقم من ملف المستأجر أولاً">📤 واتساب</button>`; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong>${p.edit_count ? ' <span class="badge">معدّل</span>' : ''}</td><td>${esc(String(p.payment_date).slice(0, 10))}${issuedTimeHM(p.created_at) ? `<div class="muted" style="font-size:11px">🕐 ${esc(issuedTimeHM(p.created_at))}</div>` : ''}</td>
         <td class="muted" style="white-space:nowrap;font-size:12px">${p.period_from ? `${esc(String(p.period_from).slice(0, 10))} – ${esc(String(p.period_to || '').slice(0, 10))}` : '—'}</td>
-        <td>${esc(c.tenant_name || '')}</td><td>${esc(c.unit_name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
+        <td>${p.contract_id ? esc(c.tenant_name || '') : `${esc(p.payer_name || '')} <span class="badge">تصفية — بدون عقد</span>`}</td><td>${p.contract_id ? esc(c.unit_name || '') : esc((CACHE.properties.find((pr) => pr.id === p.property_id) || {}).name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
         <td><button class="btn small" onclick="showReceipt(${p.id})">عرض/طباعة</button>
         <button class="btn small" onclick="editPayment(${p.id})">تعديل</button>
         ${waBtn}
@@ -1664,7 +1664,7 @@ async function viewPayments() {
   draw(sorted);
   $('#payFilter').addEventListener('input', (e) => {
     const q = e.target.value.trim();
-    draw(sorted.filter((p) => { const c = contractById[p.contract_id] || {}; return !q || `${c.tenant_name} ${c.unit_name} ${p.receipt_no}`.includes(q); }));
+    draw(sorted.filter((p) => { const c = contractById[p.contract_id] || {}; return !q || `${c.tenant_name} ${c.unit_name} ${p.payer_name || ''} ${p.receipt_no}`.includes(q); }));
   });
 }
 
@@ -1683,7 +1683,7 @@ async function toggleTrash() {
   trashOpen = true;
   const contractById = Object.fromEntries(CACHE.contracts.map((c) => [c.id, c]));
   box.innerHTML = trash.length ? `<div class="table-wrap"><table><tr><th>رقم السند</th><th>التاريخ</th><th>المستأجر</th><th>المبلغ</th><th>حُذف بتاريخ</th><th></th></tr>
-    ${trash.map((p) => { const c = contractById[p.contract_id] || {}; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong></td><td>${esc(String(p.payment_date).slice(0, 10))}</td><td>${esc(c.tenant_name || '')}</td><td class="money">${money(p.amount)}</td><td class="muted">${esc(String(p.deleted_at || '').slice(0, 10))}</td>
+    ${trash.map((p) => { const c = contractById[p.contract_id] || {}; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong></td><td>${esc(String(p.payment_date).slice(0, 10))}</td><td>${esc(c.tenant_name || p.payer_name || '')}</td><td class="money">${money(p.amount)}</td><td class="muted">${esc(String(p.deleted_at || '').slice(0, 10))}</td>
     <td><button class="btn small" onclick="showReceipt(${p.id})">عرض</button>
     <button class="btn small primary" onclick="restorePayment(${p.id})">↩️ استرجاع</button></td></tr>`; }).join('')}</table></div>`
     : '<p class="muted">لا توجد سندات محذوفة.</p>';
@@ -1735,14 +1735,19 @@ function defaultPeriodClient(contract, paymentDateStr) {
 async function paymentForm(contractId, presetAmount, editPayment = null) {
   await refreshCache();
   const active = CACHE.contracts.filter((c) => c.status === 'active');
-  if (!editPayment && !active.length) {
-    openModal('إضافة سند قبض', '<p>لا يوجد عقد سارٍ بعد. خطوات البداية:</p><ol><li>أضف عقاراً من تبويب العقارات</li><li>أضف وحدة</li><li>أضف مستأجراً</li><li>أنشئ عقداً — وبعدها يصبح زر سند القبض جاهزاً</li></ol>');
-    return;
-  }
   const pool = editPayment ? CACHE.contracts : active;
-  const sel = editPayment ? editPayment.contract_id : (contractId || active[0].id);
+  const sel = editPayment ? editPayment.contract_id : (contractId || (active[0] && active[0].id));
   const c0 = pool.find((c) => c.id === sel);
+  // وضع السند (تحديث 59): «بعقد» افتراضياً، أو «بدون عقد — تصفية إيجار»
+  // لاستلام مبلغ تصفية لا عقد له؛ وإن لم توجد عقود سارية فالوضع الثاني هو المتاح
+  let payMode = editPayment && !editPayment.contract_id ? 'nocontract' : 'contract';
+  if (!editPayment && !active.length) payMode = 'nocontract';
   formModal(editPayment ? `تعديل سند قبض رقم ${String(editPayment.receipt_no || '').padStart(4, '0')}` : 'إضافة سند قبض', `
+    <div class="chips" style="margin-bottom:10px">
+      <button type="button" class="chip pay-mode" data-mode="contract">بعقد</button>
+      <button type="button" class="chip pay-mode" data-mode="nocontract">بدون عقد — تصفية إيجار</button>
+    </div>
+    <div id="payContractBox">
     <label>بحث العقار<input id="payPropSearch" type="text" placeholder="اكتب اسم العقار للتصفية…"></label>
     <label>العقار<select id="payProp"></select></label>
     <label>بحث المستأجر<input id="payTenantSearch" type="text" placeholder="ابحث بالاسم أو رقم الجوال أو رقم العقد…"></label>
@@ -1755,6 +1760,12 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       <button type="button" class="chip" id="chipArrears" onclick="setPayAmount(${c0 ? c0.arrears : 0})">سداد المتأخرات: ${money(c0 ? c0.arrears : 0)}</button>
       <button type="button" class="chip" id="chipInstallment" onclick="setPayAmount(${c0 ? (c0.installment_amount ?? c0.rent_amount) : 0})">قيمة قسط واحد: ${money(c0 ? (c0.installment_amount ?? c0.rent_amount) : 0)}</button>
     </div>`}
+    </div>
+    <div id="payNoContractBox" class="hidden">
+      <label>اسم الدافع *<input name="payer_name" id="payPayerName" value="${editPayment ? esc(editPayment.payer_name || '') : ''}" placeholder="اسم من سلّم مبلغ التصفية"></label>
+      <label>العقار (اختياري)<select name="nc_property_id" id="payNcProp"><option value="">— بدون عقار (لا يظهر في كشف مالك) —</option>${CACHE.properties.map((pr) => `<option value="${pr.id}" ${editPayment && editPayment.property_id === pr.id ? 'selected' : ''}>${esc(pr.name)}</option>`).join('')}</select></label>
+      <p class="muted" style="margin:-4px 0 10px">سند تصفية إيجار بلا عقد: يدخل في المحصّل العام، ويظهر في كشف مالك العقار المختار، ولا يؤثر على أقساط أو متأخرات أي عقد.</p>
+    </div>
     <label>المبلغ (${CUR.label}) *<input name="amount" id="payAmount" type="number" step="0.01" min="0.01" required value="${editPayment ? editPayment.amount : (presetAmount ?? '')}"></label>
     <label>تاريخ الدفع<input name="payment_date" type="date" value="${editPayment ? String(editPayment.payment_date).slice(0, 10) : todayStr()}"></label>
     <label>تقويم فترة السداد<select name="period_cal" id="periodCal"><option value="greg" selected>ميلادي</option><option value="hijri">هجري</option></select></label>
@@ -1776,7 +1787,7 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     </div>
     <label>طريقة الدفع<select name="method" id="payMethod">${PAY_METHODS.map((m) => `<option ${editPayment && editPayment.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
     <label id="methodDateWrap" class="hidden">تاريخ العملية (التحويل / الشيك / المنصة)<input name="method_date" id="payMethodDate" type="date" value="${editPayment && editPayment.method_date ? String(editPayment.method_date).slice(0, 10) : ''}"><span class="muted" style="display:block;font-weight:normal">إن اختلف تاريخ التحويل أو الشيك أو المنصة عن تاريخ السند اكتبه هنا — واتركه فارغاً إن كان نفسه.</span></label>
-    <label>المقابل (الغرض)<select name="purpose">${PAY_PURPOSES.map((x) => `<option ${x === (editPayment ? (editPayment.purpose || 'إيجار') : 'إيجار') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+    <label id="purposeWrap">المقابل (الغرض)<select name="purpose" id="payPurpose">${PAY_PURPOSES.map((x) => `<option ${x === (editPayment ? (editPayment.purpose || 'إيجار') : 'إيجار') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
     <div id="svcPeriod" class="hidden">
       <span class="muted" style="display:block;margin-bottom:4px">مدة الخدمة — تُضبط فترة السداد من تاريخ الدفع:</span>
       <div class="chips">
@@ -1788,8 +1799,24 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     <p class="muted" style="margin:0">تنبيه: دفعات الإيجار فقط تُحتسب في الأقساط والمتأخرات؛ وباقي الأغراض تحصيلات لا تُنقص متأخرات الإيجار، ودفعات «خدمات» لا تظهر في كشف حساب المالك.</p>
     <label>ملاحظات<input name="notes" value="${esc(editPayment ? (editPayment.notes || '') : '')}"></label>`,
     async (data) => {
-      if (!data.contract_id) throw new Error('اختر المستأجر والعقد أولاً — عدّل البحث إن لم يظهر');
-      data.installment_no = data.installment_no ? Number(data.installment_no) : null;
+      if (payMode === 'nocontract') {
+        // سند تصفية بلا عقد (تحديث 59): اسم الدافع إلزامي، والغرض ثابت،
+        // والعقار اختياري من القائمة المنفصلة، والفترة اختيارية كما هي
+        const payer = String(data.payer_name || '').trim();
+        if (!payer) throw new Error('اكتب اسم الدافع — سند التصفية يحتاج اسم من سلّم المبلغ');
+        data.payer_name = payer;
+        data.property_id = data.nc_property_id ? Number(data.nc_property_id) : null;
+        data.contract_id = null;
+        data.installment_no = null;
+        data.purpose = 'تصفية إيجار';
+        if (!data.period_from) data.period_from = null;
+        if (!data.period_to) data.period_to = null;
+      } else {
+        if (!data.contract_id) throw new Error('اختر المستأجر والعقد أولاً — عدّل البحث إن لم يظهر');
+        data.installment_no = data.installment_no ? Number(data.installment_no) : null;
+        delete data.payer_name;
+      }
+      delete data.nc_property_id;
       // فترة السداد: في وضع الهجري تُحوَّل المدخلات إلى ميلادي ISO (صيغة التخزين القياسية)
       if (data.period_cal === 'hijri') {
         const f = hijriToIso(data.pf_h_y, data.pf_h_m, data.pf_h_d);
@@ -1807,11 +1834,11 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       // تاريخ العملية يُحفظ فقط لطرق التحويل/الشيك/المنصة (تحديث 56)
       if (!METHODS_WITH_DATE.includes(data.method)) data.method_date = '';
       if (editPayment) {
-        await api(`/api/payments/${editPayment.id}`, { method: 'PUT', body: JSON.stringify({ ...data, contract_id: Number(data.contract_id), amount: Number(data.amount) }) });
+        await api(`/api/payments/${editPayment.id}`, { method: 'PUT', body: JSON.stringify({ ...data, contract_id: data.contract_id ? Number(data.contract_id) : null, amount: Number(data.amount) }) });
         render();
         setTimeout(() => showReceipt(editPayment.id), 80);
       } else {
-        const payment = await api('/api/payments', { method: 'POST', body: JSON.stringify({ ...data, contract_id: Number(data.contract_id), amount: Number(data.amount) }) });
+        const payment = await api('/api/payments', { method: 'POST', body: JSON.stringify({ ...data, contract_id: data.contract_id ? Number(data.contract_id) : null, amount: Number(data.amount) }) });
         render();
         setTimeout(() => showReceipt(payment.id, true), 80);
       }
@@ -1820,6 +1847,21 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
   // ومزامنة حقول الهجري/الميلادي عند تبديل التقويم
   const form = document.getElementById('modalForm');
   if (form) {
+    // وضع «بدون عقد — تصفية إيجار» (تحديث 59): تبديل أقسام النموذج
+    const contractBox = document.getElementById('payContractBox');
+    const ncBox = document.getElementById('payNoContractBox');
+    const purposeWrap = document.getElementById('purposeWrap');
+    const applyPayMode = () => {
+      const nc = payMode === 'nocontract';
+      if (contractBox) contractBox.classList.toggle('hidden', nc);
+      if (ncBox) ncBox.classList.toggle('hidden', !nc);
+      if (purposeWrap) purposeWrap.classList.toggle('hidden', nc);
+      const svc = document.getElementById('svcPeriod');
+      if (svc && nc) svc.classList.add('hidden');
+      form.querySelectorAll('.pay-mode').forEach((b) => b.classList.toggle('active', b.dataset.mode === payMode));
+    };
+    form.querySelectorAll('.pay-mode').forEach((b) => b.addEventListener('click', () => { payMode = b.dataset.mode; applyPayMode(); }));
+    applyPayMode();
     const contractEl = form.elements.contract_id;
     const dateEl = form.elements.payment_date;
     const calEl = document.getElementById('periodCal');
@@ -1852,6 +1894,7 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       if (t) toEl.value = t;
     };
     const applyDefaultPeriod = () => {
+      if (payMode === 'nocontract') return; // فترة التصفية يدوية اختيارية — بلا تعبئة من عقد
       const c = pool.find((x) => x.id === Number(contractEl.value));
       const def = defaultPeriodClient(c, dateEl.value);
       if (!def) return;
@@ -2040,11 +2083,12 @@ async function showReceipt(paymentId, justCreated = false) {
       ${issuedAtLine(p.created_at, p.payment_date)}
       ${p.edit_count ? `<div class="doc-stamp">نسخة معدّلة${p.edited_at ? ` — آخر تعديل: ${esc(String(p.edited_at).slice(0, 10))}` : ''}</div>` : ''}
       ${p.deleted_at ? `<div class="doc-stamp deleted">سند محذوف — للاطلاع فقط</div>` : ''}
+      ${!r.contract ? `<div class="doc-stamp">تصفية إيجار — بدون عقد</div>` : ''}
       <table>
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
         ${r.tenant && r.tenant.id_number ? `<tr><td>رقم الهوية</td><td>${esc(r.tenant.id_number)}</td></tr>` : ''}
-        ${isRent ? `<tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>` : `<tr><td>الوحدة</td><td>${esc(r.unit ? r.unit.name : '')}</td></tr>`}
+        ${isRent ? `<tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>` : (r.unit ? `<tr><td>الوحدة</td><td>${esc(r.unit.name)}</td></tr>` : (r.property ? `<tr><td>العقار</td><td>${esc(r.property.name)}</td></tr>` : ''))}
         ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
         ${isRent ? `<tr><td>العقد</td><td>من ${esc(r.contract ? contractDateDisp(r.contract, r.contract.start_date) : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(contractDateDisp(r.contract, r.contract.end_date)) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>` : ''}
         ${p.period_from && p.period_to ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
