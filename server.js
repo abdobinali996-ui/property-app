@@ -501,8 +501,22 @@ function checkPeriod(period_from, period_to) {
 app.post('/api/payments', auth, async (req, res) => {
   try {
     const body = req.body || {};
-    if (!body.contract_id || !(Number(body.amount) > 0)) {
-      return res.status(400).json({ error: 'اختر العقد وأدخل مبلغاً صحيحاً' });
+    // سند «تصفية إيجار» بلا عقد (تحديث 59 — بطلب عبده): استلام مبلغ تصفية
+    // لا عقد له في النظام — يُقبل بلا contract_id بشرط اسم الدافع، ويُحفظ
+    // بغرض «تصفية إيجار» وعقار اختياري يربطه بكشف مالك ذلك العقار.
+    const noContract = !body.contract_id;
+    const payerName = String(body.payer_name || '').trim();
+    if (!(Number(body.amount) > 0)) {
+      return res.status(400).json({ error: 'أدخل مبلغاً صحيحاً' });
+    }
+    if (noContract && !payerName) {
+      return res.status(400).json({ error: 'اختر العقد، أو اختر «بدون عقد — تصفية إيجار» واكتب اسم الدافع' });
+    }
+    let settlePropertyId = null;
+    if (noContract && body.property_id) {
+      const prop = await db.get('properties', Number(body.property_id));
+      if (!prop) return res.status(400).json({ error: 'العقار المختار غير موجود' });
+      settlePropertyId = prop.id;
     }
     const paymentDate = body.payment_date || calc.fmtDate(new Date());
     // تاريخ العملية (تحديث 56 — بطلب عبده): تاريخ التحويل/الشيك/المنصة إن
@@ -511,8 +525,9 @@ app.post('/api/payments', auth, async (req, res) => {
     if (methodDate && !/^\d{4}-\d{2}-\d{2}$/.test(methodDate)) {
       return res.status(400).json({ error: 'تاريخ التحويل/الشيك/المنصة غير صالح' });
     }
-    const purpose = calc.PAYMENT_PURPOSES.includes(body.purpose) ? body.purpose : 'إيجار';
-    const contract = await db.get('contracts', Number(body.contract_id));
+    const purpose = noContract ? 'تصفية إيجار'
+      : (calc.PAYMENT_PURPOSES.includes(body.purpose) && body.purpose !== 'تصفية إيجار' ? body.purpose : 'إيجار');
+    const contract = noContract ? null : await db.get('contracts', Number(body.contract_id));
     // رقم القسط الصريح: لدفعات الإيجار فقط وضمن عدد أقساط العقد، وإلا null (تلقائي)
     let installmentNo = null;
     if (purpose === 'إيجار' && contract) {
@@ -533,7 +548,9 @@ app.post('/api/payments', auth, async (req, res) => {
     const periodError = checkPeriod(periodFrom, periodTo);
     if (periodError) return res.status(400).json({ error: periodError });
     const payment = await db.insertPayment({
-      contract_id: Number(body.contract_id),
+      contract_id: noContract ? null : Number(body.contract_id),
+      payer_name: noContract ? payerName : null,
+      property_id: noContract ? settlePropertyId : null,
       amount: Number(body.amount),
       payment_date: paymentDate,
       method: body.method || 'تحويل',
@@ -578,11 +595,17 @@ app.get('/api/payments/:id/receipt', auth, async (req, res) => {
   try {
     const payment = await db.get('payments', req.params.id);
     if (!payment) return res.status(404).json({ error: 'غير موجود' });
-    const contract = await db.get('contracts', payment.contract_id);
+    const contract = payment.contract_id ? await db.get('contracts', payment.contract_id) : null;
     const tenant = contract ? await db.get('tenants', contract.tenant_id) : null;
     const unit = contract ? await db.get('units', contract.unit_id) : null;
-    const property = unit ? await db.get('properties', unit.property_id) : null;
-    const allPays = (await db.list('payments')).filter((p) => p.contract_id === payment.contract_id);
+    // سند تصفية بلا عقد (تحديث 59): العقار من حقل السند نفسه، واسم المستأجر
+    // المعروض على السند ورمز QR هو اسم الدافع الحر
+    const property = unit ? await db.get('properties', unit.property_id)
+      : (payment.property_id ? await db.get('properties', payment.property_id) : null);
+    const tenantOut = tenant || (!contract && payment.payer_name ? { name: payment.payer_name } : null);
+    const allPays = payment.contract_id
+      ? (await db.list('payments')).filter((p) => p.contract_id === payment.contract_id)
+      : [];
     const summary = contract ? calc.contractSummary(contract, allPays) : null;
     // دفعة غير إيجارية لا قسط لها — تُخفى فقرة القسط من السند كلياً
     let installment = contract ? calc.installmentInfo(contract, allPays, payment.id) : null;
@@ -603,14 +626,14 @@ app.get('/api/payments/:id/receipt', auth, async (req, res) => {
       receipt_no: payment.receipt_no,
       payment: normPayment,
       issued_by: await displayNameFor(payment.created_by),
-      tenant, unit, property,
+      tenant: tenantOut, unit, property,
       contract: contract ? { ...contract, start_date: calc.fmtDate(contract.start_date), end_date: calc.fmtDate(contract.end_date) || null } : null,
       summary,
       installment,
       installment_balance,
       settings,
       verify_code,
-      qr_text: receiptQrText({ payment: normPayment, receipt_no: payment.receipt_no, tenant, settings, verify_code }),
+      qr_text: receiptQrText({ payment: normPayment, receipt_no: payment.receipt_no, tenant: tenantOut, settings, verify_code }),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -882,6 +905,19 @@ async function ownerStatementData(property, from, to) {
       };
     })
     .sort((a, b) => a.date.localeCompare(b.date));
+  // سندات «تصفية إيجار» بلا عقد المرتبطة بهذا العقار مباشرة (تحديث 59):
+  // إيراد إيجار للمالك بلا عقد — تظهر صفاً وإجمالاً كأي تحصيل على العقار
+  for (const p of payments) {
+    if (p.contract_id != null || p.property_id !== property.id) continue;
+    const d = calc.fmtDate(p.payment_date);
+    if (d < from || d > to) continue;
+    incomeRows.push({
+      date: d, receipt_no: p.receipt_no,
+      description: `تصفية إيجار — ${p.payer_name || ''} (بدون عقد)`,
+      amount: Number(p.amount),
+    });
+  }
+  incomeRows.sort((a, b) => a.date.localeCompare(b.date));
   const propExpenses = expenses
     .filter((e) => e.property_id === property.id && calc.fmtDate(e.expense_date) >= from && calc.fmtDate(e.expense_date) <= to)
     .map((e) => ({
@@ -936,7 +972,10 @@ async function ownersData() {
     let collected = 0, expTotal = 0, payouts = 0;
     for (const pay of payments) {
       if (calc.isOfficePayment(pay)) continue;
-      const pid = propOfContract(contractById.get(pay.contract_id));
+      // سند تصفية بلا عقد (تحديث 59): عقاره مأخوذ من حقل السند نفسه
+      const pid = pay.contract_id == null
+        ? (pay.property_id != null ? pay.property_id : null)
+        : propOfContract(contractById.get(pay.contract_id));
       if (pid != null && g.property_ids.has(pid)) collected += Number(pay.amount) || 0;
     }
     for (const e of expenses) {
@@ -1373,6 +1412,8 @@ app.get('/api/reports/monthly', auth, async (req, res) => {
       const c = contractById[p.contract_id];
       const u = c ? unitById[c.unit_id] : null;
       if (u && u.property_id != null) bucket(u.property_id).collected += Number(p.amount || 0);
+      // سند تصفية بلا عقد (تحديث 59): يُنسب لعقاره المباشر إن اختير له عقار
+      else if (p.contract_id == null && p.property_id != null) bucket(p.property_id).collected += Number(p.amount || 0);
     }
     for (const e of monthExpenses) {
       if (e.property_id != null) bucket(e.property_id).expenses += Number(e.amount || 0);
