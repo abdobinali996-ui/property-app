@@ -1712,6 +1712,12 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const collectedThisMonth = payments
       .filter((p) => calc.fmtDate(p.payment_date).startsWith(ym))
       .reduce((s, p) => s + Number(p.amount || 0), 0);
+    // المحصّل هذا العام (تحديث 55 — بطلب عبده): كل سندات قبض السنة الحالية
+    // (إيجار + خدمات) حسب تاريخ الدفع وبتوقيت البرنامج، بنفس منطق الشهر
+    const yearPrefix = String(now.getFullYear());
+    const collectedThisYear = payments
+      .filter((p) => calc.fmtDate(p.payment_date).startsWith(yearPrefix))
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
     const [rawContracts] = await Promise.all([db.list('contracts')]);
     const arrearsList = contracts
       .filter((c) => c.arrears > 0)
@@ -1809,9 +1815,24 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const collectedByMethod = groupMethodRows(
       [...perMethodDash.entries()].map(([method, b]) => ({ method, total: calc.round2(b.total), count: b.count })),
     );
+    // تفصيل «محصّل هذا العام» حسب أقسام طريقة الدفع — نفس أقسام الشهر
+    const perMethodYear = new Map();
+    for (const p of payments) {
+      if (!calc.fmtDate(p.payment_date).startsWith(yearPrefix)) continue;
+      const key = p.method || 'تحويل';
+      const b = perMethodYear.get(key) || { total: 0, count: 0 };
+      b.total += Number(p.amount || 0);
+      b.count += 1;
+      perMethodYear.set(key, b);
+    }
+    const collectedYearByMethod = groupMethodRows(
+      [...perMethodYear.entries()].map(([method, b]) => ({ method, total: calc.round2(b.total), count: b.count })),
+    );
     res.json({
       collected_this_month: collectedThisMonth,
       collected_by_method: collectedByMethod,
+      collected_this_year: calc.round2(collectedThisYear),
+      collected_year_by_method: collectedYearByMethod,
       due_this_month: dueThisMonth,
       total_remaining: calc.round2(totalRemaining),
       dues_list: duesList,

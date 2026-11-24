@@ -422,6 +422,7 @@ async function viewDashboard() {
   main().innerHTML = `
     <div class="cards">
       <div class="card good" style="cursor:pointer" onclick="showCollectedDetails()" title="اضغط لعرض المحصّل مقسماً حسب طريقة الدفع"><div class="lbl">المحصّل هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.collected_this_month)}</div></div>
+      <div class="card good" style="cursor:pointer" onclick="showCollectedYearDetails()" title="اضغط لعرض محصّل العام مقسماً حسب طريقة الدفع"><div class="lbl">المحصّل هذا العام <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.collected_this_year ?? 0)}</div></div>
       <div class="card" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض المستحق والمتأخر عند كل مستأجر"><div class="lbl">المستحق هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.due_this_month)}</div></div>
       <div class="card warn" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض المتأخرات عند كل مستأجر"><div class="lbl">إجمالي المتأخرات <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.total_arrears)}</div></div>
       <div class="card" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض التفاصيل عند كل مستأجر"><div class="lbl">إجمالي الباقي (من كل العقود) <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.total_remaining ?? 0)}</div></div>
@@ -517,6 +518,21 @@ async function showCollectedDetails() {
     </table></div>
     <p class="muted">أقسام المحصّل هذا الشهر: نقدي، وبنك (تحويل بنكي وشبكة/مدى)، ومحافظ إلكترونية (فودافون كاش وإنستاباي)، وشيك، ومنصة إيجار بفرعيها (لحساب المكتب / لحساب المالك).</p>`
     : '<p class="muted">لا توجد تحصيلات هذا الشهر بعد.</p>');
+}
+
+// تفصيل «المحصّل هذا العام» عند الضغط على بطاقته — نفس أقسام الشهر (تحديث 55)
+async function showCollectedYearDetails() {
+  const d = await api('/api/dashboard');
+  const groups = d.collected_year_by_method || [];
+  const totCount = groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
+  openModal('المحصّل هذا العام — حسب طريقة الدفع', groups.length ? `
+    <div class="table-wrap"><table>
+      <tr><th>القسم / طريقة الدفع</th><th>عدد السندات</th><th>المبلغ</th></tr>
+      ${groups.map((g) => `<tr><td><strong>${esc(g.group)}</strong></td><td><strong>${g.count}</strong></td><td><strong>${money(g.total)}</strong></td></tr>${g.items.length > 1 ? g.items.map((x) => `<tr><td style="padding-right:22px">↳ ${esc(x.method)}</td><td>${x.count}</td><td>${money(x.total)}</td></tr>`).join('') : ''}`).join('')}
+      <tr><td><strong>الإجمالي</strong></td><td><strong>${totCount}</strong></td><td><strong>${money(d.collected_this_year)}</strong></td></tr>
+    </table></div>
+    <p class="muted">أقسام المحصّل هذا العام: نقدي، وبنك (تحويل بنكي وشبكة/مدى)، ومحافظ إلكترونية (فودافون كاش وإنستاباي)، وشيك، ومنصة إيجار بفرعيها (لحساب المكتب / لحساب المالك).</p>`
+    : '<p class="muted">لا توجد تحصيلات هذا العام بعد.</p>');
 }
 
 // نتائج البحث الشامل مجمّعة حسب النوع، مع انتقال مباشر للملف/السند المعني
