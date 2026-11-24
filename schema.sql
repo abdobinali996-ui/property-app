@@ -62,7 +62,7 @@ CREATE SEQUENCE IF NOT EXISTS receipt_seq START 1;
 
 CREATE TABLE IF NOT EXISTS payments (
   id            SERIAL PRIMARY KEY,
-  contract_id   INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+  contract_id   INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
   amount        NUMERIC(12,2) NOT NULL,
   payment_date  DATE NOT NULL DEFAULT CURRENT_DATE,
   method        TEXT NOT NULL DEFAULT 'تحويل',  -- نقداً / تحويل / شيك / شبكة
@@ -82,6 +82,10 @@ ALTER TABLE payments ADD COLUMN IF NOT EXISTS period_to DATE;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT '';
 -- للقواعد الموجودة مسبقاً: غرض الدفعة (المقابل)
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS purpose TEXT DEFAULT 'إيجار';
+-- تحديث 59: سند «تصفية إيجار» بلا عقد — العقد اختياري، واسم الدافع والعقار على السند نفسه
+ALTER TABLE payments ALTER COLUMN contract_id DROP NOT NULL;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS payer_name TEXT DEFAULT '';
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS property_id INTEGER;
 
 -- تسلسل أرقام سندات الصرف
 CREATE SEQUENCE IF NOT EXISTS voucher_seq START 1;
