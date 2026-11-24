@@ -9,7 +9,7 @@ const TABLES = {
   units: ['property_id', 'name', 'type', 'floor', 'default_rent', 'status', 'notes'],
   tenants: ['name', 'phone', 'id_number', 'email', 'notes', 'contract_no'],
   contracts: ['unit_id', 'tenant_id', 'start_date', 'end_date', 'rent_amount', 'cycle', 'installments_count', 'deposit', 'status', 'notes', 'calendar', 'opening_paid', 'increase_new_annual', 'increase_eff_date'],
-  payments: ['contract_id', 'amount', 'payment_date', 'method', 'purpose', 'notes', 'period_from', 'period_to', 'created_by', 'edited_at', 'edit_count', 'deleted_at', 'installment_no'],
+  payments: ['contract_id', 'amount', 'payment_date', 'method', 'method_date', 'purpose', 'notes', 'period_from', 'period_to', 'created_by', 'edited_at', 'edit_count', 'deleted_at', 'installment_no'],
   expenses: ['property_id', 'unit_id', 'category', 'amount', 'expense_date', 'description', 'payee', 'payment_method', 'created_by'],
   meter_readings: ['unit_id', 'meter_type', 'reading_value', 'reading_date', 'notes'],
   listings: ['title', 'kind', 'price', 'area_name', 'size_m2', 'rooms', 'baths', 'floor', 'description', 'owner_name', 'phone', 'status', 'featured', 'views', 'wa_clicks'],
@@ -71,6 +71,7 @@ ALTER TABLE payments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS edit_count INTEGER DEFAULT 0;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS installment_no INTEGER;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS method_date DATE;
 CREATE TABLE IF NOT EXISTS expenses (
   id SERIAL PRIMARY KEY, property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
   unit_id INTEGER REFERENCES units(id) ON DELETE SET NULL,

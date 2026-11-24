@@ -407,6 +407,12 @@ for (const table of Object.keys(db.TABLES)) {
         const existingPay = await db.get('payments', req.params.id);
         if (!existingPay) return res.status(404).json({ error: 'غير موجود' });
         bodyToSave = { ...bodyToSave, edited_at: new Date().toISOString(), edit_count: (Number(existingPay.edit_count) || 0) + 1 };
+        // تطبيع تاريخ العملية عند التعديل (تحديث 56): ISO صالح أو null
+        if (bodyToSave.method_date !== undefined) {
+          const md = bodyToSave.method_date ? String(bodyToSave.method_date).slice(0, 10) : null;
+          if (md && !/^\d{4}-\d{2}-\d{2}$/.test(md)) return res.status(400).json({ error: 'تاريخ التحويل/الشيك/المنصة غير صالح' });
+          bodyToSave = { ...bodyToSave, method_date: md };
+        }
         // تطبيع رقم القسط: لدفعات الإيجار فقط وضمن عدد أقساط العقد، وإلا يُصفَّر (تلقائي)
         if (bodyToSave.installment_no !== undefined || bodyToSave.purpose !== undefined || bodyToSave.contract_id !== undefined) {
           const cid = bodyToSave.contract_id !== undefined ? Number(bodyToSave.contract_id) : existingPay.contract_id;
@@ -466,6 +472,12 @@ app.post('/api/payments', auth, async (req, res) => {
       return res.status(400).json({ error: 'اختر العقد وأدخل مبلغاً صحيحاً' });
     }
     const paymentDate = body.payment_date || calc.fmtDate(new Date());
+    // تاريخ العملية (تحديث 56 — بطلب عبده): تاريخ التحويل/الشيك/المنصة إن
+    // اختلف عن تاريخ السند، اختياري ويُخزَّن كما هو بصيغة ISO
+    const methodDate = body.method_date ? String(body.method_date).slice(0, 10) : null;
+    if (methodDate && !/^\d{4}-\d{2}-\d{2}$/.test(methodDate)) {
+      return res.status(400).json({ error: 'تاريخ التحويل/الشيك/المنصة غير صالح' });
+    }
     const purpose = calc.PAYMENT_PURPOSES.includes(body.purpose) ? body.purpose : 'إيجار';
     const contract = await db.get('contracts', Number(body.contract_id));
     // رقم القسط الصريح: لدفعات الإيجار فقط وضمن عدد أقساط العقد، وإلا null (تلقائي)
@@ -492,6 +504,7 @@ app.post('/api/payments', auth, async (req, res) => {
       amount: Number(body.amount),
       payment_date: paymentDate,
       method: body.method || 'تحويل',
+      method_date: methodDate,
       purpose,
       notes: body.notes || '',
       period_from: periodFrom,
@@ -521,6 +534,7 @@ function receiptQrText({ payment, receipt_no, tenant, settings, verify_code }) {
     `المبلغ: ${Number(payment.amount)} ${CUR_LABEL}`,
     `التاريخ: ${calc.fmtDate(payment.payment_date)}`,
     `طريقة الدفع: ${payment.method || ''}`,
+    payment.method_date ? `تاريخ العملية: ${calc.fmtDate(payment.method_date)}` : null,
     `رمز التحقق: ${verify_code}`,
   ];
   return lines.filter(Boolean).join('\n');

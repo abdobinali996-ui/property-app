@@ -10,6 +10,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const todayStr = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 // طرق الدفع/السداد المتاحة في سندات القبض والصرف (تُحفظ كنص وتُطبع كما هي في السند)
 const PAY_METHODS = ['نقداً', 'تحويل بنكي', 'شبكة', 'فودافون كاش', 'إنستاباي', 'محفظة إلكترونية', 'شيك', 'منصة إيجار — لحساب المكتب', 'منصة إيجار — لحساب المالك'];
+// طرق دفع لها «تاريخ عملية» اختياري قد يختلف عن تاريخ السند (تحديث 56 — بطلب عبده)
+const METHODS_WITH_DATE = ['تحويل بنكي', 'فودافون كاش', 'إنستاباي', 'محفظة إلكترونية', 'شيك', 'منصة إيجار — لحساب المكتب', 'منصة إيجار — لحساب المالك'];
 // إعداد البلد (من إعدادات المؤسسة): يضبط العملة والتفقيط والمنطقة الزمنية وترقيم الجوال الدولي
 const COUNTRY_PRESETS = {
   sa: { label: 'ر.س', code: 'SAR', tz: 'Asia/Riyadh', words: { one: 'ريال سعودي واحد', two: 'ريالان سعوديان', few: 'ريالات سعودية', other: 'ريال سعودي', sub: 'هللة' } },
@@ -1612,7 +1614,7 @@ async function viewPayments() {
         ? `<button class="btn small" onclick="sendReceiptWhatsApp(${p.id})">📤 واتساب</button>`
         : `<button class="btn small" disabled title="لا يوجد رقم جوال مسجل لهذا المستأجر — أضف الرقم من ملف المستأجر أولاً">📤 واتساب</button>`; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong>${p.edit_count ? ' <span class="badge">معدّل</span>' : ''}</td><td>${esc(String(p.payment_date).slice(0, 10))}${issuedTimeHM(p.created_at) ? `<div class="muted" style="font-size:11px">🕐 ${esc(issuedTimeHM(p.created_at))}</div>` : ''}</td>
         <td class="muted" style="white-space:nowrap;font-size:12px">${p.period_from ? `${esc(String(p.period_from).slice(0, 10))} – ${esc(String(p.period_to || '').slice(0, 10))}` : '—'}</td>
-        <td>${esc(c.tenant_name || '')}</td><td>${esc(c.unit_name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}</td>
+        <td>${esc(c.tenant_name || '')}</td><td>${esc(c.unit_name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
         <td><button class="btn small" onclick="showReceipt(${p.id})">عرض/طباعة</button>
         <button class="btn small" onclick="editPayment(${p.id})">تعديل</button>
         ${waBtn}
@@ -1733,7 +1735,8 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
         <input name="pt_h_y" id="ptHy" type="number" min="1300" max="1600" placeholder="السنة">
       </span></label>
     </div>
-    <label>طريقة الدفع<select name="method">${PAY_METHODS.map((m) => `<option ${editPayment && editPayment.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+    <label>طريقة الدفع<select name="method" id="payMethod">${PAY_METHODS.map((m) => `<option ${editPayment && editPayment.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+    <label id="methodDateWrap" class="hidden">تاريخ العملية (التحويل / الشيك / المنصة)<input name="method_date" id="payMethodDate" type="date" value="${editPayment && editPayment.method_date ? String(editPayment.method_date).slice(0, 10) : ''}"><span class="muted" style="display:block;font-weight:normal">إن اختلف تاريخ التحويل أو الشيك أو المنصة عن تاريخ السند اكتبه هنا — واتركه فارغاً إن كان نفسه.</span></label>
     <label>المقابل (الغرض)<select name="purpose">${PAY_PURPOSES.map((x) => `<option ${x === (editPayment ? (editPayment.purpose || 'إيجار') : 'إيجار') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
     <div id="svcPeriod" class="hidden">
       <span class="muted" style="display:block;margin-bottom:4px">مدة الخدمة — تُضبط فترة السداد من تاريخ الدفع:</span>
@@ -1762,6 +1765,8 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
       if (data.period_from && data.period_to && data.period_to < data.period_from) {
         throw new Error('تاريخ نهاية فترة السداد يجب أن يكون بعد تاريخ بدايتها أو مساوياً له');
       }
+      // تاريخ العملية يُحفظ فقط لطرق التحويل/الشيك/المنصة (تحديث 56)
+      if (!METHODS_WITH_DATE.includes(data.method)) data.method_date = '';
       if (editPayment) {
         await api(`/api/payments/${editPayment.id}`, { method: 'PUT', body: JSON.stringify({ ...data, contract_id: Number(data.contract_id), amount: Number(data.amount) }) });
         render();
@@ -1783,6 +1788,12 @@ async function paymentForm(contractId, presetAmount, editPayment = null) {
     const toEl = document.getElementById('periodTo');
     const gregBox = document.getElementById('periodGreg');
     const hijriBox = document.getElementById('periodHijri');
+    // إظهار خانة «تاريخ العملية» فقط لطرق التحويل/الشيك/المنصة (تحديث 56)
+    const methodEl = document.getElementById('payMethod');
+    const methodDateWrap = document.getElementById('methodDateWrap');
+    const syncMethodDate = () => { if (methodEl && methodDateWrap) methodDateWrap.classList.toggle('hidden', !METHODS_WITH_DATE.includes(methodEl.value)); };
+    if (methodEl) methodEl.addEventListener('change', syncMethodDate);
+    syncMethodDate();
     let periodTouched = false;
     let toTouched = false;
     // تُسنَد بعد تعريف fillInstallments بالأسفل؛ قبلها تبقى بلا عمل حتى لا
@@ -2000,7 +2011,7 @@ async function showReceipt(paymentId, justCreated = false) {
         ${p.period_from && p.period_to ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
         ${isRent && r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
         <tr><td>المبلغ المستلم</td><td><strong>${money(p.amount)}</strong></td></tr>
-        <tr><td>طريقة الدفع</td><td>${esc(p.method)}</td></tr>
+        <tr><td>طريقة الدفع</td><td>${esc(p.method)}${p.method_date ? ` — تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}` : ''}</td></tr>
         <tr><td>مقابل</td><td>${esc(p.purpose || 'إيجار')}</td></tr>
         ${r.issued_by ? `<tr><td>أصدره</td><td>${esc(r.issued_by)}</td></tr>` : ''}
         ${p.notes ? `<tr><td>ملاحظات</td><td>${esc(p.notes)}</td></tr>` : ''}
