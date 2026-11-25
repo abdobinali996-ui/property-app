@@ -434,6 +434,7 @@ async function viewDashboard() {
       <div class="card"><div class="lbl">عدد الملاك</div><div class="num">${d.owners_count ?? 0}</div></div>
       <div class="card good"><div class="lbl">رصيد المكتب (خدمات − مصروفات المكتب)</div><div class="num">${money(d.office_balance ?? 0)}</div></div>
       <div class="card" style="cursor:pointer" onclick="document.querySelector('#tabs button[data-view=deposits]').click()" title="اضغط لفتح خانة العربون"><div class="lbl">العربون المحتجَز <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.deposits_total ?? 0)}</div><div class="muted">${d.deposits_count ?? 0} سند عربون · هذا الشهر: ${money(d.deposits_this_month ?? 0)}</div></div>
+      <div class="card" style="cursor:pointer" onclick="showInsuranceDetails()" title="اضغط لعرض تفاصيل التأمين المحتجَز"><div class="lbl">التأمين المحتجَز <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.insurance_total ?? 0)}</div><div class="muted">${d.insurance_count ?? 0} سند تأمين لم يُردّ بعد · هذا الشهر: ${money(d.insurance_this_month ?? 0)}</div></div>
       <div class="card"><div class="lbl">إجمالي قيمة العقود</div><div class="num">${money(d.contracts_total ?? 0)}</div><div class="muted">${d.contracts_count ?? 0} عقد سارٍ</div></div>
     </div>
 
@@ -1762,8 +1763,9 @@ async function convertDeposit(id) {
 
 // ردّ تأمين للمستأجر (تحديث 64): تصفية التأمين المحتجَز عند الخروج —
 // يُنشئ سند صرف «رد تأمين» ويُخصم من المردود على سند القبض نفسه
-async function refundInsuranceForm(id) {
-  const p = CACHE.payments.find((x) => x.id === id);
+async function refundInsuranceForm(id, fromDetails = false) {
+  let p = (CACHE.payments || []).find((x) => x.id === id);
+  if (!p) { CACHE.payments = await api('/api/payments'); p = CACHE.payments.find((x) => x.id === id); }
   if (!p) return;
   const remaining = Math.round((Number(p.amount || 0) - Number(p.refunded_amount || 0)) * 100) / 100;
   if (remaining <= 0) { alert('التأمين مردود بالكامل من قبل'); return; }
@@ -1777,14 +1779,45 @@ async function refundInsuranceForm(id) {
     </div>
     <label>ملاحظات (اختياري — مثل: خصم صيانة)<input name="notes" placeholder="سبب أي خصم من التأمين إن وجد"></label>`,
   async (data) => {
-    const amount = num(data.amount);
+    const amount = Number(data.amount);
     if (!(amount > 0)) throw new Error('أدخل مبلغ الرد');
     if (amount > remaining) throw new Error(`مبلغ الرد أكبر من التأمين المتبقي (${money(remaining)})`);
     const r = await api(`/api/payments/${id}/refund-insurance`, { method: 'POST', body: JSON.stringify({ amount, expense_date: data.expense_date || undefined, payment_method: data.payment_method, notes: data.notes || '' }) });
     await refreshCache();
     alert(`تم ردّ ${money(amount)} للمستأجر — اتسجلت بسند صرف رقم ${String(r.expense.voucher_no || '').padStart(4, '0')} (فئة: رد تأمين)`);
-    go('payments');
+    if (fromDetails) { go('dashboard'); showInsuranceDetails(); } else { go('payments'); }
   });
+}
+
+// تفاصيل التأمين المحتجَز (تحديث 67 — بطلب عبده): مين دفع وكام، والمردود
+// والمحتجَز لكل سند، مع زر الرد من نفس الشاشة — والإجمالي يقلّ مع كل ردّ.
+async function showInsuranceDetails() {
+  await refreshCache();
+  const allPayments = await api('/api/payments');
+  CACHE.payments = allPayments;
+  const contractById = Object.fromEntries(CACHE.contracts.map((c) => [c.id, c]));
+  const list = allPayments
+    .filter((p) => (p.purpose || '') === 'تأمين')
+    .map((p) => ({ p, held: Math.max(0, Math.round((Number(p.amount || 0) - Number(p.refunded_amount || 0)) * 100) / 100) }))
+    .sort((a, b) => (b.held > 0) - (a.held > 0) || String(b.p.payment_date).localeCompare(String(a.p.payment_date)));
+  const totalHeld = Math.round(list.reduce((s, x) => s + x.held, 0) * 100) / 100;
+  const rows = list.map(({ p, held }) => {
+    const c = contractById[p.contract_id] || {};
+    return `<tr>
+      <td><strong>${String(p.receipt_no || '').padStart(4, '0')}</strong></td>
+      <td>${esc(c.tenant_name || '')}</td>
+      <td>${esc([c.property_name, c.unit_name].filter(Boolean).join(' — '))}</td>
+      <td>${esc(String(p.payment_date || '').slice(0, 10))}</td>
+      <td class="money">${money(p.amount)}</td>
+      <td class="money">${money(p.refunded_amount || 0)}</td>
+      <td class="money"><strong>${money(held)}</strong></td>
+      <td>${held > 0 ? `<button class="btn small" onclick="refundInsuranceForm(${p.id}, true)">↩️ رد التأمين</button>` : '<span class="muted">تم الرد بالكامل ✓</span>'}</td>
+    </tr>`;
+  }).join('');
+  openModal('🛡️ التأمين المحتجَز — التفاصيل', `
+    <p class="muted">إجمالي التأمين المحتجَز حالياً: <strong>${money(totalHeld)}</strong> — بيقلّ تلقائياً مع كل ردّ. التأمين مالوش علاقة بالإيجار ولا الخدمات ولا يدخل محصّل المكتب ولا كشوف الملاك.</p>
+    ${list.length ? `<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>رقم السند</th><th>المستأجر</th><th>العقار / الوحدة</th><th>التاريخ</th><th>التأمين</th><th>المردود</th><th>المحتجَز</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">لا توجد سندات تأمين حتى الآن.</p>'}
+    <div class="form-actions"><button class="btn" onclick="closeModal()">إغلاق</button></div>`);
 }
 
 // نموذج استلام عربون: من مين، بكم، متى، وبأي طريقة — والعقار/الوحدة اختياريان
