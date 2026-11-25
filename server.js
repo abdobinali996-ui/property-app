@@ -551,7 +551,8 @@ app.post('/api/payments', auth, async (req, res) => {
     // المحدد إن وُجد، وإلا من فترة القسط الذي تقع فيه الدفعة (calc.paymentPeriod)
     let periodFrom = body.period_from ? String(body.period_from).slice(0, 10) : null;
     let periodTo = body.period_to ? String(body.period_to).slice(0, 10) : null;
-    if (!periodFrom || !periodTo) {
+    // التأمين بلا فترة سداد (تحديث 66 — بطلب عبده): لا تُستكمل له فترة تلقائياً
+    if (purpose !== 'تأمين' && (!periodFrom || !periodTo)) {
       const def = contract ? (installmentNo ? calc.installmentPeriod(contract, installmentNo) : calc.paymentPeriod(contract, { payment_date: paymentDate })) : null;
       if (def) {
         periodFrom = periodFrom || def.period_from;
