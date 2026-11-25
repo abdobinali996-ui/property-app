@@ -433,6 +433,7 @@ async function viewDashboard() {
       <div class="card"><div class="lbl">عدد المستأجرين</div><div class="num">${d.tenants_count ?? d.counts.tenants}</div></div>
       <div class="card"><div class="lbl">عدد الملاك</div><div class="num">${d.owners_count ?? 0}</div></div>
       <div class="card good"><div class="lbl">رصيد المكتب (خدمات − مصروفات المكتب)</div><div class="num">${money(d.office_balance ?? 0)}</div></div>
+      <div class="card" style="cursor:pointer" onclick="document.querySelector('#tabs button[data-view=deposits]').click()" title="اضغط لفتح خانة العربون"><div class="lbl">العربون المحتجَز <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.deposits_total ?? 0)}</div><div class="muted">${d.deposits_count ?? 0} سند عربون · هذا الشهر: ${money(d.deposits_this_month ?? 0)}</div></div>
     </div>
 
     <div class="section">
