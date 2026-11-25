@@ -2233,16 +2233,16 @@ async function showReceipt(paymentId, justCreated = false) {
       ${issuedAtLine(p.created_at, p.payment_date)}
       ${p.edit_count ? `<div class="doc-stamp">نسخة معدّلة${p.edited_at ? ` — آخر تعديل: ${esc(String(p.edited_at).slice(0, 10))}` : ''}</div>` : ''}
       ${p.deleted_at ? `<div class="doc-stamp deleted">سند محذوف — للاطلاع فقط</div>` : ''}
-      ${(p.purpose || '') === 'تأمين' ? '<div class="doc-stamp">تأمين مسترد — يُرد للمستأجر عند الإخلاء في حالة عدم وجود أي التزامات عليه سواء صيانة أو كهرباء أو مياه أو تصفية إيجار</div>' : (!r.contract ? `<div class="doc-stamp">${(p.purpose || '') === 'عربون' ? 'عربون حجز — بدون عقد' : 'تصفية إيجار — بدون عقد'}</div>` : '')}
+      ${!r.contract ? `<div class="doc-stamp">${(p.purpose || '') === 'عربون' ? 'عربون حجز — بدون عقد' : 'تصفية إيجار — بدون عقد'}</div>` : ''}
       ${(p.purpose || '') === 'تأمين' && Number(p.refunded_amount || 0) > 0 ? `<div class="doc-stamp">${Number(p.refunded_amount) >= Number(p.amount) ? 'تم ردّ التأمين للمستأجر بالكامل' : `رُدّ من التأمين ${money(p.refunded_amount)} — المتبقي محتجَز ${money(Number(p.amount) - Number(p.refunded_amount))}`}</div>` : ''}
       <table>
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
         ${r.tenant && r.tenant.id_number ? `<tr><td>رقم الهوية</td><td>${esc(r.tenant.id_number)}</td></tr>` : ''}
-        ${isRent ? `<tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>` : (r.unit ? `<tr><td>الوحدة</td><td>${esc(r.unit.name)}</td></tr>` : (r.property ? `<tr><td>العقار</td><td>${esc(r.property.name)}</td></tr>` : ''))}
+        ${isRent || (p.purpose || '') === 'تأمين' ? `<tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>` : (r.unit ? `<tr><td>الوحدة</td><td>${esc(r.unit.name)}</td></tr>` : (r.property ? `<tr><td>العقار</td><td>${esc(r.property.name)}</td></tr>` : ''))}
         ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
         ${isRent ? `<tr><td>العقد</td><td>من ${esc(r.contract ? contractDateDisp(r.contract, r.contract.start_date) : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(contractDateDisp(r.contract, r.contract.end_date)) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>` : ''}
-        ${p.period_from && p.period_to ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
+        ${p.period_from && p.period_to && (p.purpose || '') !== 'تأمين' ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
         ${isRent && r.tenant && r.tenant.contract_no ? `<tr><td>رقم العقد</td><td><strong>${esc(r.tenant.contract_no)}</strong></td></tr>` : ''}
         <tr><td>المبلغ المستلم</td><td><strong>${money(p.amount)}</strong></td></tr>
         <tr><td>طريقة الدفع</td><td>${esc(p.method)}${p.method_date ? ` — تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}` : ''}</td></tr>
@@ -2258,6 +2258,7 @@ async function showReceipt(paymentId, justCreated = false) {
       ${r.verify_code ? `<div class="receipt-verify">${qrSvg ? `<div class="qr-box">${qrSvg}</div>` : ''}
         <div class="verify-note">رمز التحقق: <strong>${esc(r.verify_code)}</strong><br><span class="muted">امسح رمز QR بكاميرا الجوال لعرض بيانات السند ومقارنتها مع هذه الورقة.</span></div></div>` : ''}
       <div class="signatures"><div>توقيع المستلم: ____________</div><div>توقيع المدير: ____________</div></div>
+      ${(p.purpose || '') === 'تأمين' ? '<div class="doc-stamp" style="margin-top:14px">تأمين مسترد — يُرد للمستأجر عند الإخلاء في حالة عدم وجود أي التزامات عليه سواء صيانة أو كهرباء أو مياه أو تصفية إيجار</div>' : ''}
     </div>
     <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printReceipt()">🖨️ معاينة وطباعة</button>${receiptWaBtn(r)}</div>`;
   setDocPdf(`سند-قبض-${String(r.receipt_no).padStart(4, '0')}.pdf`, r.tenant ? r.tenant.phone : '');
