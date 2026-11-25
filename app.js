@@ -1721,6 +1721,7 @@ async function viewDeposits() {
     ${list.map((p) => `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong>${p.edit_count ? ' <span class="badge">معدّل</span>' : ''}</td><td>${esc(String(p.payment_date).slice(0, 10))}</td><td>${esc(p.payer_name || '')}</td><td>${esc([propName(p.property_id), unitName(p.unit_id)].filter(Boolean).join(' — '))}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
       <td><button class="btn small" onclick="showReceipt(${p.id})">عرض/طباعة</button>
       <button class="btn small" onclick="editDeposit(${p.id})">تعديل</button>
+      <button class="btn small" onclick="convertDeposit(${p.id})">تحويل لدفعة إيجار</button>
       ${delBtn('payments', p.id, `سند عربون ${String(p.receipt_no).padStart(4, '0')} — سيُنقل إلى السندات المحذوفة ويمكن استرجاعه`)}</td></tr>`).join('')}</table></div>`
     : '<p class="muted">لا توجد مبالغ عربون مسجلة بعد — دوس «+ استلام عربون» عند أول حجز.</p>';
 }
@@ -1729,6 +1730,31 @@ async function editDeposit(id) {
   try {
     const p = await api(`/api/payments/${id}`);
     depositForm(p);
+  } catch (e) { alert(e.message); }
+}
+
+// تحويل عربون إلى دفعة إيجار مقدمة على عقد (تحديث 62): اختيار العقد فقط،
+// والمبلغ وتاريخ الاستلام الأصلي يثبتان كما هما — السند نفسه يتحول بلا حذف
+// ولا إعادة إدخال، ويُعرض بعدها سند القبض الجديد للطباعة إن أراد
+async function convertDeposit(id) {
+  try {
+    await refreshCache();
+    const p = await api(`/api/payments/${id}`);
+    if (!CACHE.contracts.length) { alert('لا توجد عقود مسجلة بعد — أنشئ العقد أولاً ثم حوّل العربون إليه'); return; }
+    // ترشيح مسبق: عقد سارٍ على نفس وحدة الحجز إن وُجد
+    const pre = CACHE.contracts.find((c) => p.unit_id && c.unit_id === p.unit_id && c.status === 'active')
+      || CACHE.contracts.find((c) => p.unit_id && c.unit_id === p.unit_id);
+    formModal(`تحويل عربون إلى دفعة إيجار — سند رقم ${String(p.receipt_no || '').padStart(4, '0')}`, `
+      <p class="muted">السند نفسه هيتحول لدفعة إيجار مقدمة على العقد المختار: المبلغ ${money(p.amount)} وتاريخ الاستلام الأصلي ${esc(String(p.payment_date).slice(0, 10))} يثبتان كما هما. هيخرج من العربون المحتجَز ويدخل في محصّل العقد وكشف مالكه ويتخصم من أقساطه.</p>
+      <label>العقد *<select name="contract_id" required>
+        ${CACHE.contracts.map((c) => `<option value="${c.id}" ${pre && pre.id === c.id ? 'selected' : ''}>${esc(c.tenant_name || tenantName(c.tenant_id))} — ${esc(c.unit_name || '')} (${esc(c.property_name || '')}) · يبدأ ${esc(String(c.start_date || '').slice(0, 10))}</option>`).join('')}
+      </select></label>`,
+      async (data) => {
+        if (!data.contract_id) throw new Error('اختر العقد');
+        const row = await api(`/api/payments/${id}/convert-to-rent`, { method: 'POST', body: JSON.stringify({ contract_id: Number(data.contract_id) }) });
+        render();
+        setTimeout(() => showReceipt(row.id), 80);
+      }, 'تحويل الآن');
   } catch (e) { alert(e.message); }
 }
 
