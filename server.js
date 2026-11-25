@@ -2032,6 +2032,15 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const depositsThisMonth = calc.round2(depositPayments
       .filter((p) => calc.fmtDate(p.payment_date).startsWith(ym))
       .reduce((s, p) => s + Number(p.amount || 0), 0));
+    // التأمين المحتجَز (تحديث 67 — بطلب عبده): إجمالي ما لم يُردّ للمستأجرين
+    // بعد = مبلغ التأمين − المردود منه، ويقلّ تلقائياً مع كل ردّ.
+    const insurancePayments = payments.filter((p) => calc.isInsurancePayment(p));
+    const heldOf = (p) => Math.max(0, Number(p.amount || 0) - Number(p.refunded_amount || 0));
+    const insuranceTotal = calc.round2(insurancePayments.reduce((s, p) => s + heldOf(p), 0));
+    const insuranceCount = insurancePayments.filter((p) => heldOf(p) > 0).length;
+    const insuranceThisMonth = calc.round2(insurancePayments
+      .filter((p) => calc.fmtDate(p.payment_date).startsWith(ym))
+      .reduce((s, p) => s + Number(p.amount || 0), 0));
     // إجمالي قيمة العقود (تحديث 63 — بطلب عبده): مجموع مبالغ العقود السارية
     // كما سُجّلت (قيمة كل عقد كاملة) — حجم المحفظة الحالية على الشاشة
     // الرئيسية. العقود المنتهية أو المُخلاة أو المُجدَّدة (المستبدَلة بعقد
@@ -2046,6 +2055,9 @@ app.get('/api/dashboard', auth, async (req, res) => {
       deposits_total: depositsTotal,
       deposits_count: depositPayments.length,
       deposits_this_month: depositsThisMonth,
+      insurance_total: insuranceTotal,
+      insurance_count: insuranceCount,
+      insurance_this_month: insuranceThisMonth,
       collected_by_method: collectedByMethod,
       collected_this_year: calc.round2(collectedThisYear),
       collected_year_by_method: collectedYearByMethod,
