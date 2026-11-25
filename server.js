@@ -1937,8 +1937,18 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const collectedYearByMethod = groupMethodRows(
       [...perMethodYear.entries()].map(([method, b]) => ({ method, total: calc.round2(b.total), count: b.count })),
     );
+    // العربون المحتجَز (تحديث 61 — بطلب عبده): يظهر على الشاشة الرئيسية
+    // كمبلغ معلومة فقط — ويبقى خارج المحصّل وكل الإجماليات كما في تحديث 60.
+    const depositPayments = payments.filter((p) => calc.isDepositPayment(p));
+    const depositsTotal = calc.round2(depositPayments.reduce((s, p) => s + Number(p.amount || 0), 0));
+    const depositsThisMonth = calc.round2(depositPayments
+      .filter((p) => calc.fmtDate(p.payment_date).startsWith(ym))
+      .reduce((s, p) => s + Number(p.amount || 0), 0));
     res.json({
       collected_this_month: collectedThisMonth,
+      deposits_total: depositsTotal,
+      deposits_count: depositPayments.length,
+      deposits_this_month: depositsThisMonth,
       collected_by_method: collectedByMethod,
       collected_this_year: calc.round2(collectedThisYear),
       collected_year_by_method: collectedYearByMethod,
