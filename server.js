@@ -1975,8 +1975,17 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const depositsThisMonth = calc.round2(depositPayments
       .filter((p) => calc.fmtDate(p.payment_date).startsWith(ym))
       .reduce((s, p) => s + Number(p.amount || 0), 0));
+    // إجمالي قيمة العقود (تحديث 63 — بطلب عبده): مجموع مبالغ العقود السارية
+    // كما سُجّلت (قيمة كل عقد كاملة) — حجم المحفظة الحالية على الشاشة
+    // الرئيسية. العقود المنتهية أو المُخلاة أو المُجدَّدة (المستبدَلة بعقد
+    // أحدث) لا تُحتسب حتى لا تتضاعف قيمة نفس الإيجار.
+    const activeContracts = rawContracts.filter((c) => c.status === 'active');
+    const contractsTotal = calc.round2(activeContracts
+      .reduce((s, c) => s + Number(c.rent_amount || 0), 0));
     res.json({
       collected_this_month: collectedThisMonth,
+      contracts_total: contractsTotal,
+      contracts_count: activeContracts.length,
       deposits_total: depositsTotal,
       deposits_count: depositPayments.length,
       deposits_this_month: depositsThisMonth,
