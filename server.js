@@ -582,6 +582,37 @@ app.post('/api/payments', auth, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// تحويل سند عربون إلى دفعة إيجار على عقد (تحديث 62 — بطلب عبده): السند نفسه
+// برقمه وتاريخ استلامه الأصلي يتحول إلى «إيجار» مرتبط بالعقد، فيخرج من العربون
+// المحتجَز ويدخل محصّل العقد وكشف مالكه ويُخصم من أقساطه — بدل حذف العربون
+// وإنشاء سند جديد يدوياً. فترة السداد تُشتق من القسط الذي يقع فيه التاريخ
+// الأصلي، بنفس منطق إنشاء سند الإيجار.
+app.post('/api/payments/:id/convert-to-rent', auth, async (req, res) => {
+  try {
+    const payment = await db.get('payments', req.params.id);
+    if (!payment || payment.deleted_at) return res.status(404).json({ error: 'السند غير موجود' });
+    if (calc.paymentPurpose(payment) !== 'عربون') {
+      return res.status(400).json({ error: 'هذا السند ليس سند عربون — التحويل متاح لسندات العربون فقط' });
+    }
+    const contract = await db.get('contracts', Number((req.body || {}).contract_id));
+    if (!contract) return res.status(400).json({ error: 'اختر العقد الذي ستُرحَّل إليه الدفعة' });
+    const per = calc.paymentPeriod(contract, { payment_date: calc.fmtDate(payment.payment_date) });
+    const row = await db.update('payments', payment.id, {
+      contract_id: contract.id,
+      purpose: 'إيجار',
+      payer_name: null,
+      property_id: null,
+      unit_id: null,
+      period_from: per ? per.period_from : null,
+      period_to: per ? per.period_to : null,
+      installment_no: null,
+    });
+    await audit(req, 'payments', row.id, 'update', row);
+    await takeSnapshot('auto');
+    res.json(row);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // رمز تحقق سند القبض: أول 8 خانات سداسية عشرية من SHA-256 لبصمة السند
 // (رقم السند|المبلغ|التاريخ|العقد|سر المصادقة) — ثابت لنفس السند ويتغير بتغيّر أيٍّ من بياناته
 function receiptVerifyCode(payment) {
