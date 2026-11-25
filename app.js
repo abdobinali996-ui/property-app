@@ -2233,7 +2233,7 @@ async function showReceipt(paymentId, justCreated = false) {
       ${issuedAtLine(p.created_at, p.payment_date)}
       ${p.edit_count ? `<div class="doc-stamp">نسخة معدّلة${p.edited_at ? ` — آخر تعديل: ${esc(String(p.edited_at).slice(0, 10))}` : ''}</div>` : ''}
       ${p.deleted_at ? `<div class="doc-stamp deleted">سند محذوف — للاطلاع فقط</div>` : ''}
-      ${(p.purpose || '') === 'تأمين' ? '<div class="doc-stamp">تأمين مسترد — يُرد للمستأجر عند الإخلاء</div>' : (!r.contract ? `<div class="doc-stamp">${(p.purpose || '') === 'عربون' ? 'عربون حجز — بدون عقد' : 'تصفية إيجار — بدون عقد'}</div>` : '')}
+      ${(p.purpose || '') === 'تأمين' ? '<div class="doc-stamp">تأمين مسترد — يُرد للمستأجر عند الإخلاء في حالة عدم وجود أي التزامات عليه سواء صيانة أو كهرباء أو مياه أو تصفية إيجار</div>' : (!r.contract ? `<div class="doc-stamp">${(p.purpose || '') === 'عربون' ? 'عربون حجز — بدون عقد' : 'تصفية إيجار — بدون عقد'}</div>` : '')}
       ${(p.purpose || '') === 'تأمين' && Number(p.refunded_amount || 0) > 0 ? `<div class="doc-stamp">${Number(p.refunded_amount) >= Number(p.amount) ? 'تم ردّ التأمين للمستأجر بالكامل' : `رُدّ من التأمين ${money(p.refunded_amount)} — المتبقي محتجَز ${money(Number(p.amount) - Number(p.refunded_amount))}`}</div>` : ''}
       <table>
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
