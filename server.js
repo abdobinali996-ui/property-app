@@ -613,6 +613,52 @@ app.post('/api/payments/:id/convert-to-rent', auth, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// ردّ تأمين للمستأجر (تحديث 64 — بطلب عبده: «اعملها تصفية لما أردها له»):
+// تصفية مبلغ التأمين المحتجَز عند خروج المستأجر — يُنشأ سند صرف بفئة
+// «رد تأمين» (يظهر في سندات الصرف برقمه) ويُخصم من «المردود» على سند
+// القبض نفسه حتى لا يُردّ مرتين. فئة الرد مستثناة من كشوف الملاك والملخص
+// الشهري: مال المستأجر راجع له، ليس مصروف مالك ولا مكتب.
+const INSURANCE_REFUND_CATEGORY = 'رد تأمين';
+app.post('/api/payments/:id/refund-insurance', auth, async (req, res) => {
+  try {
+    const payment = await db.get('payments', Number(req.params.id));
+    if (!payment || payment.deleted_at) return res.status(404).json({ error: 'السند غير موجود' });
+    if (calc.paymentPurpose(payment) !== 'تأمين') {
+      return res.status(400).json({ error: 'هذا السند ليس سند تأمين — الرد متاح لسندات التأمين فقط' });
+    }
+    if (!payment.contract_id) return res.status(400).json({ error: 'سند التأمين غير مرتبط بعقد' });
+    const already = Number(payment.refunded_amount || 0);
+    const remaining = calc.round2(Number(payment.amount || 0) - already);
+    if (remaining <= 0) return res.status(400).json({ error: 'التأمين مردود بالكامل من قبل' });
+    const amount = req.body && req.body.amount != null ? Number(req.body.amount) : remaining;
+    if (!(amount > 0)) return res.status(400).json({ error: 'أدخل مبلغ الرد' });
+    if (amount > remaining) return res.status(400).json({ error: `مبلغ الرد أكبر من التأمين المتبقي (${remaining})` });
+    const contract = await db.get('contracts', payment.contract_id);
+    if (!contract) return res.status(400).json({ error: 'عقد السند غير موجود' });
+    const unit = await db.get('units', contract.unit_id);
+    const tenant = await db.get('tenants', contract.tenant_id);
+    const expenseDate = req.body && req.body.expense_date ? String(req.body.expense_date).slice(0, 10) : calc.fmtDate(new Date());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expenseDate)) return res.status(400).json({ error: 'تاريخ الرد غير صالح' });
+    const note = req.body && req.body.notes ? String(req.body.notes).trim() : '';
+    const expense = await db.insert('expenses', {
+      property_id: unit ? unit.property_id : null,
+      unit_id: contract.unit_id,
+      category: INSURANCE_REFUND_CATEGORY,
+      amount,
+      expense_date: expenseDate,
+      description: `تصفية تأمين — رد لمستأجر العقد (سند قبض رقم ${String(payment.receipt_no).padStart(4, '0')})${note ? ' — ' + note : ''}`,
+      payee: tenant ? tenant.name : '',
+      payment_method: req.body && req.body.payment_method ? String(req.body.payment_method) : (payment.method || 'تحويل'),
+      created_by: req.user ? req.user.username : '',
+    });
+    const row = await db.update('payments', payment.id, { refunded_amount: calc.round2(already + amount) });
+    await audit(req, 'payments', payment.id, 'update', row);
+    await audit(req, 'expenses', expense.id, 'create', expense);
+    await takeSnapshot('auto');
+    res.status(201).json({ payment: row, expense });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // رمز تحقق سند القبض: أول 8 خانات سداسية عشرية من SHA-256 لبصمة السند
 // (رقم السند|المبلغ|التاريخ|العقد|سر المصادقة) — ثابت لنفس السند ويتغير بتغيّر أيٍّ من بياناته
 function receiptVerifyCode(payment) {
@@ -942,6 +988,9 @@ async function ownerStatementData(property, from, to) {
     // دفعات «خدمات» مال المكتب نفسه (عمولته): لا تظهر في كشف المالك إطلاقاً —
     // لا صفوف ولا داخل الإجماليات والصافي (الإجماليات تُحسب من الصفوف)
     .filter((p) => !calc.isOfficePayment(p))
+    // الأموال المحتجَزة (عربون/تأمين — تحديث 64): ليست إيراداً للمالك،
+    // فلا تظهر في كشفه ولا تدخل إجمالياته
+    .filter((p) => !calc.isHeldPayment(p))
     .map((p) => {
       const c = propContracts.find((x) => x.id === p.contract_id);
       return {
@@ -974,7 +1023,8 @@ async function ownerStatementData(property, from, to) {
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
   // دفعات المالك نوع مستقل: لا تختلط بالمصروفات العادية، والصافي = إيراد − مصروفات − دفعات
-  const expenseRows = propExpenses.filter((e) => e.category !== OWNER_PAYOUT_CATEGORY);
+  // و«رد تأمين» (تحديث 64) ليس مصروفاً على المالك أصلاً: مال مستأجر راجع له
+  const expenseRows = propExpenses.filter((e) => e.category !== OWNER_PAYOUT_CATEGORY && e.category !== INSURANCE_REFUND_CATEGORY);
   const payoutRows = propExpenses.filter((e) => e.category === OWNER_PAYOUT_CATEGORY);
 
   const totalIncome = incomeRows.reduce((s, r) => s + r.amount, 0);
@@ -1019,8 +1069,10 @@ async function ownersData() {
     let collected = 0, expTotal = 0, payouts = 0;
     for (const pay of payments) {
       if (calc.isOfficePayment(pay)) continue;
-      // سند تصفية بلا عقد (تحديث 59): عقاره مأخوذ من حقل السند نفسه —
-      // والعربون مستثنى: مبلغ حجز معلّق لا يدخل رصيد المالك (تحديث 60)
+      // الأموال المحتجَزة (عربون/تأمين): مبالغ معلّقة لا تدخل رصيد المالك
+      // (تحديث 60 للعربون، وتحديث 64 للتأمين المرتبط بعقد)
+      if (calc.isHeldPayment(pay)) continue;
+      // سند تصفية بلا عقد (تحديث 59): عقاره مأخوذ من حقل السند نفسه
       let pid = null;
       if (pay.contract_id != null) pid = propOfContract(contractById.get(pay.contract_id));
       else if (calc.paymentPurpose(pay) === 'تصفية إيجار' && pay.property_id != null) pid = pay.property_id;
@@ -1028,6 +1080,7 @@ async function ownersData() {
     }
     for (const e of expenses) {
       if (e.property_id == null || !g.property_ids.has(e.property_id)) continue;
+      if (e.category === INSURANCE_REFUND_CATEGORY) continue; // رد تأمين: مال مستأجر، لا مصروف ولا دفعة مالك (تحديث 64)
       if (e.category === OWNER_PAYOUT_CATEGORY) payouts += Number(e.amount) || 0;
       else expTotal += Number(e.amount) || 0;
     }
@@ -1447,9 +1500,11 @@ app.get('/api/reports/monthly', auth, async (req, res) => {
     const contractById = Object.fromEntries(contracts.map((c) => [c.id, c]));
     const inMonth = (d) => calc.fmtDate(d).startsWith(month);
 
-    // العربون مستثنى من الملخص الشهري كله (تحديث 60): مبلغ حجز معلّق لا إيراد
-    const monthPayments = payments.filter((p) => inMonth(p.payment_date) && !calc.isDepositPayment(p));
-    const monthExpenses = expenses.filter((e) => inMonth(e.expense_date));
+    // الأموال المحتجَزة (عربون/تأمين) مستثناة من الملخص الشهري كله: مبالغ
+    // معلّقة لا إيراد (تحديث 60 للعربون، وتحديث 64 للتأمين)
+    const monthPayments = payments.filter((p) => inMonth(p.payment_date) && !calc.isHeldPayment(p));
+    // وردّ التأمين مستثنى من مصروفات الشهر أيضاً (تحديث 64): مال مستأجر راجع له
+    const monthExpenses = expenses.filter((e) => inMonth(e.expense_date) && e.category !== INSURANCE_REFUND_CATEGORY);
 
     // تجميع حسب العقار: التحصيل عبر عقد ← وحدة ← عقار، والمصروفات بعقارها المباشر
     const perProp = new Map();
@@ -1846,15 +1901,16 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const payments = await db.list('payments');
     const now = calc.today(); // يوم الرياض — لا يوم الخادم
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    // العربون مستثنى من المحصّلات (تحديث 60): خانته مستقلة بمبالغ حجز معلّقة
+    // الأموال المحتجَزة (عربون/تأمين) مستثناة من المحصّلات: مبالغ معلّقة
+    // ليست إيراداً (تحديث 60 للعربون، وتحديث 64 للتأمين)
     const collectedThisMonth = payments
-      .filter((p) => !calc.isDepositPayment(p) && calc.fmtDate(p.payment_date).startsWith(ym))
+      .filter((p) => !calc.isHeldPayment(p) && calc.fmtDate(p.payment_date).startsWith(ym))
       .reduce((s, p) => s + Number(p.amount || 0), 0);
     // المحصّل هذا العام (تحديث 55 — بطلب عبده): كل سندات قبض السنة الحالية
     // (إيجار + خدمات) حسب تاريخ الدفع وبتوقيت البرنامج، بنفس منطق الشهر
     const yearPrefix = String(now.getFullYear());
     const collectedThisYear = payments
-      .filter((p) => !calc.isDepositPayment(p) && calc.fmtDate(p.payment_date).startsWith(yearPrefix))
+      .filter((p) => !calc.isHeldPayment(p) && calc.fmtDate(p.payment_date).startsWith(yearPrefix))
       .reduce((s, p) => s + Number(p.amount || 0), 0);
     const [rawContracts] = await Promise.all([db.list('contracts')]);
     const arrearsList = contracts
@@ -1943,7 +1999,7 @@ app.get('/api/dashboard', auth, async (req, res) => {
     // تفصيل محصّل هذا الشهر حسب أقسام طريقة الدفع (نقدي/بنك/شيك/منصة بفرعيها/أخرى)
     const perMethodDash = new Map();
     for (const p of payments) {
-      if (calc.isDepositPayment(p)) continue;
+      if (calc.isHeldPayment(p)) continue;
       if (!calc.fmtDate(p.payment_date).startsWith(ym)) continue;
       const key = p.method || 'تحويل';
       const b = perMethodDash.get(key) || { total: 0, count: 0 };
@@ -1957,7 +2013,7 @@ app.get('/api/dashboard', auth, async (req, res) => {
     // تفصيل «محصّل هذا العام» حسب أقسام طريقة الدفع — نفس أقسام الشهر
     const perMethodYear = new Map();
     for (const p of payments) {
-      if (calc.isDepositPayment(p)) continue;
+      if (calc.isHeldPayment(p)) continue;
       if (!calc.fmtDate(p.payment_date).startsWith(yearPrefix)) continue;
       const key = p.method || 'تحويل';
       const b = perMethodYear.get(key) || { total: 0, count: 0 };
