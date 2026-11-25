@@ -26,7 +26,7 @@ function applyCountrySettings(settings) {
 }
 // أغراض الدفعات (مقابل السند): الإيجار فقط يؤثر في الأقساط والمتأخرات،
 // و«خدمات» مال المكتب نفسه فلا يظهر في كشف حساب المالك
-const PAY_PURPOSES = ['إيجار', 'خدمات', 'مياه', 'كهرباء', 'أخرى'];
+const PAY_PURPOSES = ['إيجار', 'خدمات', 'مياه', 'كهرباء', 'أخرى', 'تأمين'];
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
@@ -1655,11 +1655,12 @@ async function viewPayments() {
         ? `<button class="btn small" onclick="sendReceiptWhatsApp(${p.id})">📤 واتساب</button>`
         : `<button class="btn small" disabled title="لا يوجد رقم جوال مسجل لهذا المستأجر — أضف الرقم من ملف المستأجر أولاً">📤 واتساب</button>`; return `<tr><td><strong>${String(p.receipt_no).padStart(4, '0')}</strong>${p.edit_count ? ' <span class="badge">معدّل</span>' : ''}</td><td>${esc(String(p.payment_date).slice(0, 10))}${issuedTimeHM(p.created_at) ? `<div class="muted" style="font-size:11px">🕐 ${esc(issuedTimeHM(p.created_at))}</div>` : ''}</td>
         <td class="muted" style="white-space:nowrap;font-size:12px">${p.period_from ? `${esc(String(p.period_from).slice(0, 10))} – ${esc(String(p.period_to || '').slice(0, 10))}` : '—'}</td>
-        <td>${p.contract_id ? esc(c.tenant_name || '') : `${esc(p.payer_name || '')} <span class="badge">${(p.purpose || '') === 'عربون' ? 'عربون — بدون عقد' : 'تصفية — بدون عقد'}</span>`}</td><td>${p.contract_id ? esc(c.unit_name || '') : esc((CACHE.properties.find((pr) => pr.id === p.property_id) || {}).name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
+        <td>${p.contract_id ? esc(c.tenant_name || '') : `${esc(p.payer_name || '')} <span class="badge">${(p.purpose || '') === 'عربون' ? 'عربون — بدون عقد' : 'تصفية — بدون عقد'}</span>`}${p.contract_id && (p.purpose || '') === 'تأمين' ? ` <span class="badge amber">تأمين</span>${Number(p.refunded_amount || 0) > 0 ? `<div class="muted" style="font-size:11px">${Number(p.refunded_amount) >= Number(p.amount) ? 'تم ردّ التأمين بالكامل ✓' : `رُدّ منه ${money(p.refunded_amount)} — المتبقي محتجَز ${money(Number(p.amount) - Number(p.refunded_amount))}`}</div>` : ''}` : ''}</td><td>${p.contract_id ? esc(c.unit_name || '') : esc((CACHE.properties.find((pr) => pr.id === p.property_id) || {}).name || '')}</td><td class="money">${money(p.amount)}</td><td>${esc(p.method)}${p.method_date ? `<div class="muted" style="font-size:11px">تاريخ العملية: ${esc(String(p.method_date).slice(0, 10))}</div>` : ''}</td>
         <td><button class="btn small" onclick="showReceipt(${p.id})">عرض/طباعة</button>
         <button class="btn small" onclick="editPayment(${p.id})">تعديل</button>
         ${waBtn}
         <button class="btn small" onclick="showAttachments('payment', ${p.id}, 'سند القبض')">📎</button>
+        ${(p.purpose || '') === 'تأمين' && Number(p.refunded_amount || 0) < Number(p.amount) ? `<button class="btn small" onclick="refundInsuranceForm(${p.id})">↩️ رد التأمين</button>` : ''}
         ${delBtn('payments', p.id, `سند ${String(p.receipt_no).padStart(4, '0')} — سيُنقل إلى السندات المحذوفة ويمكن استرجاعه`)}</td></tr>`; }).join('')}</table></div>`
       : '<p class="muted">لا توجد سندات مطابقة.</p>';
   };
@@ -1757,6 +1758,33 @@ async function convertDeposit(id) {
         setTimeout(() => showReceipt(row.id), 80);
       }, 'تحويل الآن');
   } catch (e) { alert(e.message); }
+}
+
+// ردّ تأمين للمستأجر (تحديث 64): تصفية التأمين المحتجَز عند الخروج —
+// يُنشئ سند صرف «رد تأمين» ويُخصم من المردود على سند القبض نفسه
+async function refundInsuranceForm(id) {
+  const p = CACHE.payments.find((x) => x.id === id);
+  if (!p) return;
+  const remaining = Math.round((Number(p.amount || 0) - Number(p.refunded_amount || 0)) * 100) / 100;
+  if (remaining <= 0) { alert('التأمين مردود بالكامل من قبل'); return; }
+  const c = CACHE.contracts.find((x) => x.id === p.contract_id) || {};
+  formModal(`ردّ تأمين — سند قبض رقم ${String(p.receipt_no || '').padStart(4, '0')}`, `
+    <p class="muted">تصفية تأمين ${esc(c.tenant_name || '')}: التأمين المستلم ${money(p.amount)}${Number(p.refunded_amount || 0) > 0 ? ` — رُدّ منه قبل كده ${money(p.refunded_amount)}` : ''}، والمتبقي المحتجَز ${money(remaining)}. الرد هيتسجل بسند صرف «رد تأمين» برقمه في خانة سندات الصرف، ومش هيدخل كشوف الملاك ولا الملخص الشهري.</p>
+    <label>مبلغ الرد (${CUR.label}) *<input name="amount" type="number" step="0.01" min="0.01" max="${remaining}" required value="${remaining}"></label>
+    <div class="grid2">
+      <label>تاريخ الرد<input name="expense_date" type="date" value="${todayStr()}"></label>
+      <label>طريقة الرد<select name="payment_method">${PAY_METHODS.map((m) => `<option ${p.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+    </div>
+    <label>ملاحظات (اختياري — مثل: خصم صيانة)<input name="notes" placeholder="سبب أي خصم من التأمين إن وجد"></label>`,
+  async (data) => {
+    const amount = num(data.amount);
+    if (!(amount > 0)) throw new Error('أدخل مبلغ الرد');
+    if (amount > remaining) throw new Error(`مبلغ الرد أكبر من التأمين المتبقي (${money(remaining)})`);
+    const r = await api(`/api/payments/${id}/refund-insurance`, { method: 'POST', body: JSON.stringify({ amount, expense_date: data.expense_date || undefined, payment_method: data.payment_method, notes: data.notes || '' }) });
+    await refreshCache();
+    alert(`تم ردّ ${money(amount)} للمستأجر — اتسجلت بسند صرف رقم ${String(r.expense.voucher_no || '').padStart(4, '0')} (فئة: رد تأمين)`);
+    go('payments');
+  });
 }
 
 // نموذج استلام عربون: من مين، بكم، متى، وبأي طريقة — والعقار/الوحدة اختياريان
@@ -2205,7 +2233,8 @@ async function showReceipt(paymentId, justCreated = false) {
       ${issuedAtLine(p.created_at, p.payment_date)}
       ${p.edit_count ? `<div class="doc-stamp">نسخة معدّلة${p.edited_at ? ` — آخر تعديل: ${esc(String(p.edited_at).slice(0, 10))}` : ''}</div>` : ''}
       ${p.deleted_at ? `<div class="doc-stamp deleted">سند محذوف — للاطلاع فقط</div>` : ''}
-      ${!r.contract ? `<div class="doc-stamp">${(p.purpose || '') === 'عربون' ? 'عربون حجز — بدون عقد' : 'تصفية إيجار — بدون عقد'}</div>` : ''}
+      ${(p.purpose || '') === 'تأمين' ? '<div class="doc-stamp">تأمين مسترد — يُرد للمستأجر عند الإخلاء</div>' : (!r.contract ? `<div class="doc-stamp">${(p.purpose || '') === 'عربون' ? 'عربون حجز — بدون عقد' : 'تصفية إيجار — بدون عقد'}</div>` : '')}
+      ${(p.purpose || '') === 'تأمين' && Number(p.refunded_amount || 0) > 0 ? `<div class="doc-stamp">${Number(p.refunded_amount) >= Number(p.amount) ? 'تم ردّ التأمين للمستأجر بالكامل' : `رُدّ من التأمين ${money(p.refunded_amount)} — المتبقي محتجَز ${money(Number(p.amount) - Number(p.refunded_amount))}`}</div>` : ''}
       <table>
         <tr><td>استلمنا من السيد/ة</td><td><strong>${esc(r.tenant ? r.tenant.name : '')}</strong></td></tr>
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
