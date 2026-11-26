@@ -230,6 +230,13 @@ app.put('/api/users/:id', auth, adminOnly, async (req, res) => {
 app.get('/api/health', (req, res) => res.json({ ok: true, database: db.usePg ? 'postgresql' : 'local-json' }));
 
 // ---------- أدوات مساعدة ----------
+// حالة العقد الفعلية (تحديث 69 — بطلب عبده): عقد مخزَّن «سارٍ» لكن تاريخ
+// نهايته عدى يُعامَل كمنتهٍ في كل العروض والحسابات، دون تغيير القيمة
+// المخزَّنة — فلو مُدّد تاريخ النهاية في التعديل عاد سارياً تلقائياً.
+function effContractStatus(c, todayIso) {
+  if (c.status === 'active' && c.end_date && calc.fmtDate(c.end_date) < todayIso) return 'ended';
+  return c.status;
+}
 async function enrichedContracts() {
   const [contracts, units, tenants, payments, properties] = await Promise.all([
     db.list('contracts'), db.list('units'), db.list('tenants'), db.list('payments'), db.list('properties'),
@@ -239,6 +246,7 @@ async function enrichedContracts() {
   const propById = Object.fromEntries(properties.map((p) => [p.id, p]));
   const paysByContract = {};
   for (const p of payments) (paysByContract[p.contract_id] = paysByContract[p.contract_id] || []).push(p);
+  const todayIso = calc.fmtDate(calc.today());
   return contracts.map((c) => {
     const unit = unitById[c.unit_id] || {};
     const property = propById[unit.property_id] || {};
@@ -249,6 +257,7 @@ async function enrichedContracts() {
       tenant_name: (tenantById[c.tenant_id] || {}).name || '',
       start_date: calc.fmtDate(c.start_date), end_date: calc.fmtDate(c.end_date) || null,
       ...summary,
+      status: effContractStatus(c, todayIso),
       // ملخص العقد يعيد rent_amount كمجموع الأقساط المخلوطة عند وجود زيادة
       // مجدولة (تحديث 48) — لكن العميل يحتاج مبلغ العقد الأصلي كما هو في
       // قاعدة البيانات (نموذج التعديل/التجديد/الخطابات)، والمجموع المخلوط
@@ -1936,7 +1945,7 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const in10Iso = calc.fmtDate(calc.addDays(calc.today(), 10));
     const upcomingInstallments = [];
     for (const c of rawContracts) {
-      if (c.status !== 'active') continue;
+      if (effContractStatus(c, todayIso) !== 'active') continue;
       const next = calc.nextUnpaidInstallment(c, paysByContract[c.id] || []);
       if (!next || next.due_date < todayIso || next.due_date > in10Iso) continue;
       const ec = enrichedById[c.id] || {};
@@ -2045,7 +2054,7 @@ app.get('/api/dashboard', auth, async (req, res) => {
     // كما سُجّلت (قيمة كل عقد كاملة) — حجم المحفظة الحالية على الشاشة
     // الرئيسية. العقود المنتهية أو المُخلاة أو المُجدَّدة (المستبدَلة بعقد
     // أحدث) لا تُحتسب حتى لا تتضاعف قيمة نفس الإيجار.
-    const activeContracts = rawContracts.filter((c) => c.status === 'active');
+    const activeContracts = rawContracts.filter((c) => effContractStatus(c, todayIso) === 'active');
     const contractsTotal = calc.round2(activeContracts
       .reduce((s, c) => s + Number(c.rent_amount || 0), 0));
     res.json({
