@@ -421,6 +421,10 @@ const CONTRACT_STATUS = { active: ['سارٍ', 'green'], renewed: ['مُجدَّ
 async function viewDashboard() {
   await refreshCache();
   const d = await api('/api/dashboard');
+  // العقود المنتهية (تحديث 70 — بطلب عبده): حالتها الفعلية من الخادم تشمل
+  // ما انتهى تاريخه تلقائياً (تحديث 69)
+  const endedContracts = CACHE.contracts.filter((c) => c.status === 'ended');
+  const endedTotal = endedContracts.reduce((s, c) => s + Number(c.rent_amount || 0), 0);
   main().innerHTML = `
     <div class="cards">
       <div class="card good" style="cursor:pointer" onclick="showCollectedDetails()" title="اضغط لعرض المحصّل مقسماً حسب طريقة الدفع"><div class="lbl">المحصّل هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.collected_this_month)}</div></div>
@@ -436,6 +440,7 @@ async function viewDashboard() {
       <div class="card" style="cursor:pointer" onclick="document.querySelector('#tabs button[data-view=deposits]').click()" title="اضغط لفتح خانة العربون"><div class="lbl">العربون المحتجَز <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.deposits_total ?? 0)}</div><div class="muted">${d.deposits_count ?? 0} سند عربون · هذا الشهر: ${money(d.deposits_this_month ?? 0)}</div></div>
       <div class="card" style="cursor:pointer" onclick="showInsuranceDetails()" title="اضغط لعرض تفاصيل التأمين المحتجَز"><div class="lbl">التأمين المحتجَز <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.insurance_total ?? 0)}</div><div class="muted">${d.insurance_count ?? 0} سند تأمين لم يُردّ بعد · هذا الشهر: ${money(d.insurance_this_month ?? 0)}</div></div>
       <div class="card"><div class="lbl">إجمالي قيمة العقود</div><div class="num">${money(d.contracts_total ?? 0)}</div><div class="muted">${d.contracts_count ?? 0} عقد سارٍ</div></div>
+      <div class="card" style="cursor:pointer" onclick="showEndedContracts()" title="اضغط لعرض تفاصيل العقود المنتهية"><div class="lbl">العقود المنتهية <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${endedContracts.length}</div><div class="muted">إجمالي قيمتها: ${money(endedTotal)}</div></div>
     </div>
 
     <div class="section">
@@ -1829,6 +1834,31 @@ async function showInsuranceDetails() {
   openModal('🛡️ التأمين المحتجَز — التفاصيل', `
     <p class="muted">إجمالي التأمين المحتجَز حالياً: <strong>${money(totalHeld)}</strong> — بيقلّ تلقائياً مع كل ردّ. التأمين مالوش علاقة بالإيجار ولا الخدمات ولا يدخل محصّل المكتب ولا كشوف الملاك.</p>
     ${list.length ? `<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>رقم السند</th><th>المستأجر</th><th>العقار / الوحدة</th><th>التاريخ</th><th>التأمين</th><th>المردود</th><th>المحتجَز</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">لا توجد سندات تأمين حتى الآن.</p>'}
+    <div class="form-actions"><button class="btn" onclick="closeModal()">إغلاق</button></div>`);
+}
+
+// تفاصيل العقود المنتهية (تحديث 70 — بطلب عبده): كل عقد انتهى — يدوياً أو
+// تلقائياً بعد تاريخ نهايته (تحديث 69) — بمدفوعه ومتبقيه ومتأخراته، مع زر
+// تجديد مباشر لأن المنتهي هو أول مرشح للتجديد
+async function showEndedContracts() {
+  await refreshCache();
+  const list = CACHE.contracts
+    .filter((c) => c.status === 'ended')
+    .sort((a, b) => String(b.end_date || '').localeCompare(String(a.end_date || '')));
+  const total = list.reduce((s, c) => s + Number(c.rent_amount || 0), 0);
+  const rows = list.map((c) => `<tr>
+      <td><strong>${esc(c.tenant_name || '')}</strong></td>
+      <td>${esc([c.property_name, c.unit_name].filter(Boolean).join(' — '))}</td>
+      <td>${esc(contractDateDisp(c, c.end_date))}${c.calendar === 'hijri' ? ' <span class="badge">هجري</span>' : ''}</td>
+      <td class="money">${money(c.rent_amount || 0)}</td>
+      <td class="money paid-green">${money(c.total_paid || 0)}</td>
+      <td class="money due-red">${money(c.remaining_on_contract || 0)}</td>
+      <td class="money due-red">${money(c.arrears || 0)}</td>
+      <td><button class="btn small" onclick="renewContract(${c.id})">🔄 تجديد</button></td>
+    </tr>`).join('');
+  openModal('📄 العقود المنتهية — التفاصيل', `
+    <p class="muted">عدد العقود المنتهية: <strong>${list.length}</strong> — إجمالي قيمتها: <strong>${money(total)}</strong>. العقد بيبقى منتهي تلقائياً من تاني يوم تاريخ نهايته، ولو مدّدت تاريخ نهايته من تعديل العقد بيرجع ساري لوحده.</p>
+    ${list.length ? `<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>المستأجر</th><th>العقار / الوحدة</th><th>تاريخ الانتهاء</th><th>قيمة العقد</th><th>المدفوع</th><th>المتبقي</th><th>متأخرات</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">لا توجد عقود منتهية حتى الآن.</p>'}
     <div class="form-actions"><button class="btn" onclick="closeModal()">إغلاق</button></div>`);
 }
 
