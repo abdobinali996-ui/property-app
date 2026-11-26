@@ -800,19 +800,31 @@ function propertyForm(id) {
 function statementFor(propertyId) { go('statement'); setTimeout(() => { const s = $('#stmtProperty'); if (s) { s.value = propertyId; loadStatement(); } }, 60); }
 
 // ---------------- الوحدات ----------------
+function unitRowsHtml(list) {
+  if (!list.length) return '<p class="muted">لا توجد وحدات مطابقة لبحثك.</p>';
+  return `<div class="table-wrap"><table><tr><th>الوحدة</th><th>العقار</th><th>النوع</th><th>الدور</th><th>الإيجار الافتراضي</th><th>الحالة</th><th></th></tr>
+    ${list.map((u) => `<tr><td><strong>${esc(u.name)}</strong></td><td>${esc(propName(u.property_id))}</td><td>${esc(u.type || '')}</td><td>${esc(u.floor || '')}</td>
+      <td>${money(u.default_rent)}</td><td><span class="badge ${u.status === 'مؤجرة' ? 'green' : u.status === 'صيانة' ? 'red' : 'gray'}">${esc(u.status)}</span></td>
+      <td><button class="btn small" onclick="meterModal(${u.id})">العدادات</button>
+      <button class="btn small" onclick="unitForm(${u.id})">تعديل</button>
+      ${delBtn('units', u.id, esc(u.name))}</td></tr>`).join('')}</table></div>`;
+}
 async function viewUnits() {
   await refreshCache();
   main().innerHTML = `
     <div class="section">
       <div class="section-head"><h3>الوحدات</h3><button class="btn primary" onclick="unitForm()">+ إضافة وحدة</button></div>
-      ${CACHE.units.length ? `<div class="table-wrap"><table><tr><th>الوحدة</th><th>العقار</th><th>النوع</th><th>الدور</th><th>الإيجار الافتراضي</th><th>الحالة</th><th></th></tr>
-        ${CACHE.units.map((u) => `<tr><td><strong>${esc(u.name)}</strong></td><td>${esc(propName(u.property_id))}</td><td>${esc(u.type || '')}</td><td>${esc(u.floor || '')}</td>
-          <td>${money(u.default_rent)}</td><td><span class="badge ${u.status === 'مؤجرة' ? 'green' : u.status === 'صيانة' ? 'red' : 'gray'}">${esc(u.status)}</span></td>
-          <td><button class="btn small" onclick="meterModal(${u.id})">العدادات</button>
-          <button class="btn small" onclick="unitForm(${u.id})">تعديل</button>
-          ${delBtn('units', u.id, esc(u.name))}</td></tr>`).join('')}</table></div>`
+      ${CACHE.units.length ? `<div class="search-row"><input id="unitSearch" placeholder="ابحث باسم العقار أو الوحدة…"></div>
+      <div id="unitTableWrap">${unitRowsHtml(CACHE.units)}</div>`
       : '<p class="muted">لا توجد وحدات بعد.</p>'}
     </div>`;
+  const searchEl = $('#unitSearch');
+  if (searchEl) searchEl.addEventListener('input', () => {
+    const normU = (s) => String(s || '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).trim().toLowerCase();
+    const q = normU(searchEl.value);
+    const list = q ? CACHE.units.filter((u) => normU(`${propName(u.property_id)} ${u.name}`).includes(q)) : CACHE.units;
+    $('#unitTableWrap').innerHTML = unitRowsHtml(list);
+  });
 }
 // مفتاح مقارنة اسم الوحدة (تحديث 57): مثل السيرفر — مسافات وأرقام موحّدة
 function unitNameKeyF(name) {
@@ -2273,6 +2285,7 @@ async function showReceipt(paymentId, justCreated = false) {
         ${r.tenant && r.tenant.phone ? `<tr><td>رقم المستأجر (الجوال)</td><td><strong>${esc(r.tenant.phone)}</strong></td></tr>` : ''}
         ${r.tenant && r.tenant.id_number ? `<tr><td>رقم الهوية</td><td>${esc(r.tenant.id_number)}</td></tr>` : ''}
         ${isRent || (p.purpose || '') === 'تأمين' ? `<tr><td>العقار / الوحدة</td><td>${esc(r.property ? r.property.name : '')} — ${esc(r.unit ? r.unit.name : '')}</td></tr>` : (r.unit ? `<tr><td>الوحدة</td><td>${esc(r.unit.name)}</td></tr>` : (r.property ? `<tr><td>العقار</td><td>${esc(r.property.name)}</td></tr>` : ''))}
+        ${['تأمين', 'خدمات', 'عربون'].includes(p.purpose || '') && r.property && r.property.owner_name ? `<tr><td>مالك الوحدة</td><td>${esc(r.property.owner_name)}</td></tr>` : ''}
         ${r.installment ? `<tr><td>القسط</td><td>${r.installment.installment_total ? `القسط رقم ${r.installment.installment_index} من أصل ${r.installment.installment_total}` : `الدفعة رقم ${r.installment.installment_index}`}${r.installment.installment_amount != null ? ` · قيمة القسط: ${money(r.installment.installment_amount)}` : ''}</td></tr>` : ''}
         ${isRent ? `<tr><td>العقد</td><td>من ${esc(r.contract ? contractDateDisp(r.contract, r.contract.start_date) : '')} ${r.contract && r.contract.end_date ? 'إلى ' + esc(contractDateDisp(r.contract, r.contract.end_date)) : ''} · إجمالي الإيجار ${money(r.contract ? r.contract.rent_amount : 0)} (${esc(s.cycle_label || '')})</td></tr>` : ''}
         ${p.period_from && p.period_to && (p.purpose || '') !== 'تأمين' ? `<tr><td>الفترة</td><td>من ${esc(fmtHijriFull(p.period_from))} (الموافق ${esc(fmtGregFull(p.period_from))} م) إلى ${esc(fmtHijriFull(p.period_to))} (الموافق ${esc(fmtGregFull(p.period_to))} م)</td></tr>` : ''}
