@@ -598,13 +598,22 @@ function tenantResultCards(results) {
 }
 
 // ---------------- تذكير بالدفع عبر واتساب ----------------
-// تحويل الرقم السعودي المحلي (05xxxxxxxx) إلى الصيغة الدولية (9665xxxxxxxx)
+// تحويل الرقم المحلي إلى الصيغة الدولية التي يفهمها wa.me (تحديث 71 —
+// بطلب عبده: «بيفتح الواتس ولكنه مش بيفتح محادثة المستأجر»): الأرقام
+// العربية المشرقية (٠١٢٣) كانت تُحذف كلها فيخرج الرابط بلا رقم، والرقم
+// السعودي بلا صفر بادئ أو ببادئة 00 كان يمرّ كما هو فيفتح واتساب على
+// رقم غير صالح — تُعالج كل الصيغ هنا لأنها نقطة العبور الوحيدة للروابط.
 function normalizePhone(phone) {
-  let p = String(phone || '').replace(/[\s\-()]/g, '');
-  if (p.startsWith('+')) p = p.slice(1);
+  let p = String(phone || '')
+    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+    .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+    .replace(/\D/g, '');
+  if (p.startsWith('00')) p = p.slice(2);
   if (/^05\d{8}$/.test(p)) p = '966' + p.slice(1);
+  else if (/^5\d{8}$/.test(p)) p = '966' + p;
   else if (/^01\d{9}$/.test(p)) p = '20' + p.slice(1);
-  return p.replace(/\D/g, '');
+  else if (/^1\d{9}$/.test(p)) p = '20' + p;
+  return p;
 }
 function reminderMessage({ company, tenantName, amount, unitName }) {
   return [
@@ -3040,7 +3049,7 @@ function userResetPassword(id, username) {
 // ---------------- لوحة الإعلانات العامة (إدارة) ----------------
 let LST_FILTER = 'pending';
 const LST_STATUS = { pending: ['بانتظار المراجعة', '#fdf6e0', '#8a6d1a'], approved: ['معتمد', '#e7f6ee', '#0d6e3f'], rejected: ['مرفوض', '#fdecea', '#a93226'], hidden: ['مخفي', '#eef1f1', '#5a6f73'] };
-function lstWa(phone) { let d = String(phone || '').replace(/\D/g, ''); if (/^01\d{9}$/.test(d)) d = '20' + d.slice(1); return d; }
+function lstWa(phone) { return normalizePhone(phone); }
 async function viewListings() {
   const s = (CACHE.settings || {});
   const all = await api('/api/listings');
