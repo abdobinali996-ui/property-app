@@ -1916,6 +1916,12 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const collectedThisMonth = payments
       .filter((p) => !calc.isHeldPayment(p) && calc.fmtDate(p.payment_date).startsWith(ym))
       .reduce((s, p) => s + Number(p.amount || 0), 0);
+    // المحصّل اليوم (تحديث 72 — بطلب عبده): سندات اليوم الحالي بتوقيت
+    // البرنامج، بنفس منطق الشهر — الأموال المحتجَزة مستثناة
+    const todayDash = calc.fmtDate(now);
+    const collectedToday = payments
+      .filter((p) => !calc.isHeldPayment(p) && calc.fmtDate(p.payment_date) === todayDash)
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
     // المحصّل هذا العام (تحديث 55 — بطلب عبده): كل سندات قبض السنة الحالية
     // (إيجار + خدمات) حسب تاريخ الدفع وبتوقيت البرنامج، بنفس منطق الشهر
     const yearPrefix = String(now.getFullYear());
@@ -2020,6 +2026,20 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const collectedByMethod = groupMethodRows(
       [...perMethodDash.entries()].map(([method, b]) => ({ method, total: calc.round2(b.total), count: b.count })),
     );
+    // تفصيل «المحصّل اليوم» حسب أقسام طريقة الدفع — نفس أقسام الشهر (تحديث 72)
+    const perMethodToday = new Map();
+    for (const p of payments) {
+      if (calc.isHeldPayment(p)) continue;
+      if (calc.fmtDate(p.payment_date) !== todayDash) continue;
+      const key = p.method || 'تحويل';
+      const b = perMethodToday.get(key) || { total: 0, count: 0 };
+      b.total += Number(p.amount || 0);
+      b.count += 1;
+      perMethodToday.set(key, b);
+    }
+    const collectedTodayByMethod = groupMethodRows(
+      [...perMethodToday.entries()].map(([method, b]) => ({ method, total: calc.round2(b.total), count: b.count })),
+    );
     // تفصيل «محصّل هذا العام» حسب أقسام طريقة الدفع — نفس أقسام الشهر
     const perMethodYear = new Map();
     for (const p of payments) {
@@ -2058,6 +2078,8 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const contractsTotal = calc.round2(activeContracts
       .reduce((s, c) => s + Number(c.rent_amount || 0), 0));
     res.json({
+      collected_today: calc.round2(collectedToday),
+      collected_today_by_method: collectedTodayByMethod,
       collected_this_month: collectedThisMonth,
       contracts_total: contractsTotal,
       contracts_count: activeContracts.length,
