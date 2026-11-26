@@ -427,6 +427,7 @@ async function viewDashboard() {
   const endedTotal = endedContracts.reduce((s, c) => s + Number(c.rent_amount || 0), 0);
   main().innerHTML = `
     <div class="cards">
+      <div class="card good" style="cursor:pointer" onclick="showCollectedTodayDetails()" title="اضغط لعرض محصّل اليوم مقسماً حسب طريقة الدفع"><div class="lbl">المحصّل اليوم <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.collected_today ?? 0)}</div></div>
       <div class="card good" style="cursor:pointer" onclick="showCollectedDetails()" title="اضغط لعرض المحصّل مقسماً حسب طريقة الدفع"><div class="lbl">المحصّل هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.collected_this_month)}</div></div>
       <div class="card good" style="cursor:pointer" onclick="showCollectedYearDetails()" title="اضغط لعرض محصّل العام مقسماً حسب طريقة الدفع"><div class="lbl">المحصّل هذا العام <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.collected_this_year ?? 0)}</div></div>
       <div class="card" style="cursor:pointer" onclick="showDuesDetails()" title="اضغط لعرض المستحق والمتأخر عند كل مستأجر"><div class="lbl">المستحق هذا الشهر <span class="muted">(اضغط للتفاصيل)</span></div><div class="num">${money(d.due_this_month)}</div></div>
@@ -512,6 +513,21 @@ async function showDuesDetails() {
     </table></div>
     <p class="muted">القائمة تشمل كل المستأجرين بعقود سارية. «المستحق عليه الآن» = أقساط بدأ موعدها ولم تُدفع. «القسط القادم» = أول قسط غير مسدد بالكامل وموعد استحقاقه.</p>`
     : '<p class="muted">لا توجد عقود سارية حالياً.</p>');
+}
+
+// تفصيل «المحصّل اليوم» عند الضغط على بطاقته — نفس أقسام الشهر (تحديث 72)
+async function showCollectedTodayDetails() {
+  const d = await api('/api/dashboard');
+  const groups = d.collected_today_by_method || [];
+  const totCount = groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
+  openModal('المحصّل اليوم — حسب طريقة الدفع', groups.length ? `
+    <div class="table-wrap"><table>
+      <tr><th>القسم / طريقة الدفع</th><th>عدد السندات</th><th>المبلغ</th></tr>
+      ${groups.map((g) => `<tr><td><strong>${esc(g.group)}</strong></td><td><strong>${g.count}</strong></td><td><strong>${money(g.total)}</strong></td></tr>${g.items.length > 1 ? g.items.map((x) => `<tr><td style="padding-right:22px">↳ ${esc(x.method)}</td><td>${x.count}</td><td>${money(x.total)}</td></tr>`).join('') : ''}`).join('')}
+      <tr><td><strong>الإجمالي</strong></td><td><strong>${totCount}</strong></td><td><strong>${money(d.collected_today)}</strong></td></tr>
+    </table></div>
+    <p class="muted">أقسام محصّل اليوم: نقدي، وبنك (تحويل بنكي وشبكة/مدى)، ومحافظ إلكترونية (فودافون كاش وإنستاباي)، وشيك، ومنصة إيجار بفرعيها (لحساب المكتب / لحساب المالك). العربون والتأمين لا يدخلان المحصّل لأنهما أموال محتجَزة.</p>`
+    : '<p class="muted">لا توجد تحصيلات اليوم بعد.</p>');
 }
 
 // تفصيل «المحصّل هذا الشهر» عند الضغط على بطاقته: كام كاش وكام بنك وكام
