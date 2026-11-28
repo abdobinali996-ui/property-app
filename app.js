@@ -927,12 +927,35 @@ const LETTER_REASONS = {
   expiry: { ar: 'انتهاء مدة العقد', en: 'expiry of the lease term', ur: 'مدتِ کرایہ ختم ہونا', bn: 'ইজারার মেয়াদ শেষ হওয়া' },
   late: { ar: 'التأخر في سداد الإيجار', en: 'delay in rent payment', ur: 'کرایہ کی ادائیگی میں تاخیر', bn: 'ভাড়া পরিশোধে বিলম্ব' },
   owner: { ar: 'رغبة المالك في استرداد الوحدة', en: "the owner's wish to recover the unit", ur: 'مالک کی یونٹ واپس لینے کی خواہش', bn: 'মালিকের ইউনিট ফেরত নেওয়ার ইচ্ছা' },
+  breach: { ar: 'مخالفة شروط العقد', en: 'breach of the lease terms', ur: 'معاہدے کی شرائط کی خلاف ورزی', bn: 'ইজারার শর্ত ভঙ্গ' },
+  demolition: { ar: 'هدم أو ترميم العقار', en: 'demolition or renovation of the property', ur: 'عمارت کی مسماری یا مرمت', bn: 'ভবন ভেঙে ফেলা বা সংস্কার' },
   other: { ar: 'أسباب إدارية', en: 'administrative reasons', ur: 'انتظامی وجوہات', bn: 'প্রশাসনিক কারণ' },
 };
 const LETTER_SIG = { ar: 'إدارة المكتب', en: 'The Management', ur: 'دفتر انتظامیہ', bn: 'ব্যবস্থাপনা' };
 const LETTER_SIGN_LABEL = { ar: 'التوقيع', en: 'Signature', ur: 'دستخط', bn: 'স্বাক্ষর' };
 const LETTER_STAMP_LABEL = { ar: 'الختم', en: 'Stamp', ur: 'مہر', bn: 'সিল' };
 const LETTER_TYPE_LABELS = { renewal: 'نهاية إيجار وزيادة عند التجديد', increase: 'زيادة القيمة الإيجارية', eviction: 'إخلاء الوحدة' };
+// تحديث 73: فقرات إضافية لخطاب الإخلاء — المتأخرات (عند سبب التأخر) وبند التسليم والتصفية
+function evictExtras(lang, d) {
+  const out = [];
+  if (d.reasonKey === 'late' && d.arrears) {
+    out.push({
+      ar: `ونلفت عنايتكم إلى أن إجمالي المتأخرات المستحقة عليكم حتى تاريخه يبلغ ${d.arrears} ${CUR.label}، ويرجى سدادها كاملة قبل تاريخ الإخلاء المحدد أعلاه.`,
+      en: `Please note that your total outstanding arrears to date amount to ${d.arrears} ${CUR.code}, which must be settled in full before the vacate date stated above.`,
+      ur: `براہ کرم نوٹ فرمائیں کہ آج تک آپ کے ذمے کل بقایاجات ${d.arrears} ${CUR.label} ہیں، جنہیں اوپر دی گئی خالی کرنے کی تاریخ سے پہلے مکمل ادا کرنا ضروری ہے۔`,
+      bn: `অনুগ্রহ করে লক্ষ্য করুন, আজ পর্যন্ত আপনার মোট বকেয়া ${d.arrears} ${CUR.label}, যা উপরে উল্লিখিত খালি করার তারিখের আগে সম্পূর্ণ পরিশোধ করতে হবে।`,
+    }[lang] || '');
+  }
+  if (d.handover === '1') {
+    out.push({
+      ar: 'وعند الإخلاء يرجى تسليم الوحدة والمفاتيح إلى المكتب بحالتها، مع تسوية قراءات عدادات الكهرباء والمياه حتى تاريخ التسليم، وستتم تصفية مبلغ التأمين المحتجَز بعد التسليم وفق الشروط المتفق عليها.',
+      en: 'Upon vacating, please hand over the unit and its keys to the office in their condition, with electricity and water meter readings settled up to the handover date; the held insurance amount will then be settled after handover in accordance with the agreed terms.',
+      ur: 'خالی کرتے وقت براہ کرم یونٹ اور اس کی چابیاں دفتر کے حوالے کریں، اور حوالگی کی تاریخ تک بجلی اور پانی کے میٹروں کی ریڈنگ کا تصفیہ کریں؛ اس کے بعد رکھا گیا بیمہ کی رقم طے شدہ شرائط کے مطابق طے کی جائے گی۔',
+      bn: 'খালি করার সময় অনুগ্রহ করে ইউনিট ও এর চাবি অফিসে হস্তান্তর করুন এবং হস্তান্তরের তারিখ পর্যন্ত বিদ্যুৎ ও পানির মিটার রিডিং নিষ্পত্তি করুন; এরপর আটকে রাখা বীমা অর্থ সম্মত শর্ত অনুযায়ী নিষ্পত্তি করা হবে।',
+    }[lang] || '');
+  }
+  return out.filter(Boolean);
+}
 // تاريخ الخطاب مزدوجاً: هجري وميلادي معاً (يُدخل بأي تقويم ويُطبع بالاثنين)
 function letterDualDate(ddmmyyyy, lang) {
   const iso = ddmmyyyyToIso(ddmmyyyy);
@@ -990,6 +1013,7 @@ function letterText(lang, type, d) {
       `Dear Mr./Ms. ${d.tenantName},`,
       `Tenant of unit (${d.unitName}) at property (${d.propertyName}).`,
       `Please be informed that you are required to vacate the above unit no later than ${vacateDate}, for the following reason: ${reason}.`,
+      ...evictExtras('en', d),
       'Please contact the office to arrange the handover of the unit and settle any outstanding amounts. Thank you for your cooperation.',
     ] };
   }
@@ -1004,6 +1028,7 @@ function letterText(lang, type, d) {
       `محترم ${d.tenantName} صاحب/صاحبہ،`,
       `یونٹ (${d.unitName})، عمارت (${d.propertyName}) کے کرایہ دار۔`,
       `آپ کو مطلع کیا جاتا ہے کہ درج ذیل وجہ کی بنا پر آپ کو ${vacateDate} تک یونٹ خالی کرنا ہوگا: ${reason}۔`,
+      ...evictExtras('ur', d),
       'براہ کرم یونٹ کی حوالگی اور واجبات کی ادائیگی کے لیے دفتر سے رابطہ فرمائیں۔ آپ کے تعاون کا شکریہ۔',
     ] };
   }
@@ -1018,6 +1043,7 @@ function letterText(lang, type, d) {
       `প্রিয় জনাব/জনাবা ${d.tenantName},`,
       `ইউনিট (${d.unitName}), সম্পত্তি (${d.propertyName}) এর ভাড়াটিয়া।`,
       `আপনাকে জানানো যাচ্ছে যে, নিম্নলিখিত কারণে আপনাকে ${vacateDate} তারিখের মধ্যে ইউনিটটি খালি করতে হবে: ${reason}।`,
+      ...evictExtras('bn', d),
       'ইউনিট হস্তান্তর ও বকেয়া পরিশোধের জন্য অনুগ্রহ করে অফিসে যোগাযোগ করুন। আপনার সহযোগিতার জন্য ধন্যবাদ।',
     ] };
   }
@@ -1031,6 +1057,7 @@ function letterText(lang, type, d) {
     `السيد/ السيدة: ${d.tenantName} — المحترم،`,
     `مستأجر وحدة: ${d.unitName} — بالعقار: ${d.propertyName}.`,
     `نفيدكم بضرورة إخلاء الوحدة المذكورة أعلاه في موعد أقصاه ${vacateDate}، وذلك بسبب: ${reason}.`,
+    ...evictExtras('ar', d),
     'نرجو التكرم بالتواصل مع المكتب لترتيب استلام الوحدة وتسوية أي مستحقات قائمة، شاكرين لكم حسن تعاونكم.',
   ] };
 }
@@ -1083,6 +1110,12 @@ function letterForm(contractId, editRow) {
       <label>سبب الإخلاء<select id="ltReason">
         ${Object.entries(LETTER_REASONS).map(([k, v]) => `<option value="${k}"${editRow && ed.reasonKey === k ? ' selected' : ''}>${esc(v.ar)}</option>`).join('')}
       </select></label>
+      <label>أو اختر مهلة إخلاء من اليوم<select id="ltGrace">
+        <option value="">— استخدام التاريخ اللي فوق —</option>
+        ${[30, 60, 90].map((n) => `<option value="${n}"${editRow && String(ed.graceDays) === String(n) ? ' selected' : ''}>مهلة ${n} يوم من اليوم</option>`).join('')}
+      </select></label>
+      <p class="muted" style="margin:-4px 0 10px">المتأخرات الحالية على هذا العقد: <strong>${money(c.arrears || 0)}</strong> — هتظهر في الخطاب تلقائياً لو سبب الإخلاء هو التأخر في السداد.</p>
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ltHandover" style="width:auto"${editRow ? (ed.handover === '1' ? ' checked' : '') : ' checked'}> إضافة بند التسليم والتصفية (المفاتيح + عدادات الكهرباء والمياه + تصفية التأمين)</label>
     </div>
     <label>لغات إضافية مع العربية (تقدر تختار أكتر من لغة)</label>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin:4px 0 10px">
@@ -1099,6 +1132,18 @@ function letterForm(contractId, editRow) {
     $('#ltRenewal').classList.toggle('hidden', v !== 'renewal');
     $('#ltIncrease').classList.toggle('hidden', v !== 'increase');
     $('#ltEviction').classList.toggle('hidden', v !== 'eviction');
+  });
+  // تحديث 73: اختيار مهلة بالأيام يملأ تاريخ الإخلاء تلقائياً (ميلادي وهجري معاً)
+  const ltGraceEl = document.getElementById('ltGrace');
+  if (ltGraceEl) ltGraceEl.addEventListener('change', () => {
+    const n = Number(ltGraceEl.value);
+    if (!n) return;
+    const iso = addDaysStr(todayStr(), n);
+    const inp = document.getElementById('ltDate');
+    if (inp) inp.value = iso;
+    const hp = isoToHijriParts(iso);
+    const hd = document.getElementById('ltDateHd'), hm = document.getElementById('ltDateHm'), hy = document.getElementById('ltDateHy');
+    if (hd && hm && hy) { hd.value = hp.d; hm.value = hp.m; hy.value = hp.y; }
   });
   // تقويم إدخال التواريخ: التبديل بين الميلادي والهجري مع مزامنة القيم بينهما
   const ltPairs = [['ltEnd', 'ltEnd'], ['ltFrom', 'ltFrom'], ['ltDate', 'ltDate']];
@@ -1167,6 +1212,10 @@ async function showLetter(contractId) {
     effDate: fmtGregFull(ltDateIso('ltFrom', 'ltFrom')),
     vacateDate: fmtGregFull(ltDateIso('ltDate', 'ltDate')),
     reasonKey: $('#ltReason') ? $('#ltReason').value : 'other',
+    // تحديث 73: لقطة المتأخرات وبند التسليم ومهلة الإخلاء لخطاب الإخلاء
+    arrears: (type === 'eviction' && $('#ltReason') && $('#ltReason').value === 'late' && Number(c.arrears) > 0) ? fmtN(c.arrears) : '',
+    handover: (type === 'eviction' && document.getElementById('ltHandover') && document.getElementById('ltHandover').checked) ? '1' : '',
+    graceDays: type === 'eviction' ? (document.getElementById('ltGrace') ? document.getElementById('ltGrace').value : '') : '',
   };
   const doc = renderLetterDoc(type, lang2, d, s);
   const waText = letterPlainText(type, lang2, d, s);
@@ -1227,6 +1276,7 @@ async function viewLetters() {
           <td>${r.lang2 ? esc(langLabel(r.lang2)) : '—'}</td>
           <td style="white-space:nowrap"><button class="btn small" onclick="showSavedLetter(${r.id})">عرض</button>
           <button class="btn small" onclick="editSavedLetter(${r.id})">تعديل</button>
+          ${r.type === 'eviction' && !r.archived ? `<button class="btn small" onclick="markEvicted(${r.id})">تم الإخلاء</button>` : ''}
           <button class="btn small" onclick="toggleArchiveLetter(${r.id}, ${r.archived ? 'false' : 'true'})">${r.archived ? 'استعادة' : 'أرشفة'}</button>
           ${delBtn('letters', r.id, `خطاب رقم ${r.id}`)}</td></tr>`).join('')}</table></div>`
       : '<p class="muted">لا توجد خطابات هنا — اعرض أي خطاب من ملف مستأجر وسيُحفظ هنا.</p>'}
@@ -1253,6 +1303,36 @@ async function showSavedLetter(id) {
   openModal(`خطاب محفوظ رقم ${r.id} — ${esc(LETTER_TYPE_LABELS[r.type] || '')}`, doc + `
     <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>${waBtn}</div>`);
   $('#printArea').innerHTML = doc;
+}
+// تحديث 73: تنفيذ الإخلاء فعلياً من خطاب الإخلاء المحفوظ — إنهاء العقد + أرشفة الخطاب + تنبيه التأمين المحتجَز
+async function markEvicted(letterId) {
+  const r = await api(`/api/letters/${letterId}`);
+  if (!r || r.type !== 'eviction') return;
+  await refreshCache();
+  const cid = Number(r.contract_id);
+  const c = (CACHE.contracts || []).find((x) => x.id === cid);
+  const t = (CACHE.tenants || []).find((x) => x.id === Number(r.tenant_id)) || {};
+  if (!confirm(`تأكيد تنفيذ الإخلاء للمستأجر ${t.name || ''}؟\nسيتم إنهاء العقد نهائياً وأرشفة خطاب الإخلاء.`)) return;
+  if (c && c.status !== 'ended') {
+    await api(`/api/contracts/${cid}`, { method: 'PUT', body: JSON.stringify({ status: 'ended' }) });
+  }
+  await api(`/api/letters/${letterId}`, { method: 'PUT', body: JSON.stringify({ archived: true }) });
+  let ins = null;
+  try {
+    const pays = await api('/api/payments');
+    ins = pays.find((p) => p.purpose === 'تأمين' && Number(p.contract_id) === cid && (Number(p.amount) - Number(p.refunded_amount || 0)) > 0) || null;
+  } catch (_) {}
+  await refreshCache();
+  if (ins) {
+    const held = Number(ins.amount) - Number(ins.refunded_amount || 0);
+    openModal('تم الإخلاء ✅', `<p>تم إنهاء العقد وأرشفة خطاب الإخلاء رقم ${letterId}.</p>
+      <p>يوجد <strong>تأمين محتجَز</strong> لهذا المستأجر بقيمة <strong>${money(held)}</strong> لم يُردّ بعد.</p>
+      <div class="form-actions"><button class="btn primary" onclick="closeModal();refundInsuranceForm(${ins.id})">↩️ رد التأمين الآن</button>
+      <button class="btn" onclick="closeModal();viewLetters()">لاحقاً</button></div>`);
+  } else {
+    alert('تم إنهاء العقد وأرشفة الخطاب. لا يوجد تأمين محتجَز على هذا العقد.');
+    viewLetters();
+  }
 }
 
 // ---------------- نهاية خطابات الزيادة والإخلاء ----------------
