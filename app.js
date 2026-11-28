@@ -934,7 +934,10 @@ const LETTER_REASONS = {
 const LETTER_SIG = { ar: 'إدارة المكتب', en: 'The Management', ur: 'دفتر انتظامیہ', bn: 'ব্যবস্থাপনা' };
 const LETTER_SIGN_LABEL = { ar: 'التوقيع', en: 'Signature', ur: 'دستخط', bn: 'স্বাক্ষর' };
 const LETTER_STAMP_LABEL = { ar: 'الختم', en: 'Stamp', ur: 'مہر', bn: 'সিল' };
-const LETTER_TYPE_LABELS = { renewal: 'نهاية إيجار وزيادة عند التجديد', increase: 'زيادة القيمة الإيجارية', eviction: 'إخلاء الوحدة' };
+const LETTER_TYPE_LABELS = { renewal: 'نهاية إيجار وزيادة عند التجديد', increase: 'زيادة القيمة الإيجارية', eviction: 'إخلاء الوحدة', clearance: 'إخلاء طرف — إقرار المستأجر' };
+// تحديث 76: توقيع المستأجر وتاريخه في ذيل إقرار إخلاء الطرف (يوقّع المستأجر لا المكتب)
+const LETTER_TENANT_SIG_LABEL = { ar: 'توقيع المستأجر', en: "Tenant's signature", ur: 'کرایہ دار کے دستخط', bn: 'ভাড়াটিয়ার স্বাক্ষর' };
+const LETTER_DATE_LABEL = { ar: 'التاريخ', en: 'Date', ur: 'تاریخ', bn: 'তারিখ' };
 // تحديث 73: فقرات إضافية لخطاب الإخلاء — المتأخرات (عند سبب التأخر) وبند التسليم والتصفية
 function evictExtras(lang, d) {
   const out = [];
@@ -971,6 +974,29 @@ function letterText(lang, type, d) {
   const endDate = letterDualDate(d.endDate, lang);
   const effDate = letterDualDate(d.effDate, lang);
   const vacateDate = letterDualDate(d.vacateDate, lang);
+  if (type === 'clearance') {
+    // تحديث 76 — إقرار من المستأجر نفسه (بنص عبده): أخلى برغبته دون تدخل من
+    // المكتب أو المالك، ويتعهد بسداد وتصفية كافة المستحقات حتى تاريخ الإخلاء؛
+    // يوقّع المستأجر في الذيل — لا التزام على المكتب
+    const locAr = [d.area ? `منطقة ${d.area}` : '', d.district ? `حي ${d.district}` : ''].filter(Boolean).join('، ');
+    const locEn = [d.area ? `${d.area} area` : '', d.district ? `${d.district} district` : ''].filter(Boolean).join(', ');
+    if (lang === 'en') return { title: 'Unit Vacating Declaration and Undertaking to Settle Dues', tenantSig: true, paras: [
+      `I, ${d.tenantName}, tenant of unit ${d.unitName} at property ${d.propertyName}${locEn ? `, located in ${locEn}` : ''}, hereby declare that I have vacated the said unit of my own free will, without any intervention by the office or the owner.`,
+      `I undertake to pay and settle all dues related to the unit — rent, electricity, water and maintenance — up to the vacating date (${vacateDate}).`,
+    ] };
+    if (lang === 'ur') return { title: 'یونٹ خالی کرنے کا اقرار اور واجبات کی ادائیگی کا عہد', tenantSig: true, paras: [
+      `میں ${d.tenantName}، یونٹ ${d.unitName}، عمارت ${d.propertyName} کا کرایہ دار، اقرار کرتا ہوں کہ میں نے مذکورہ یونٹ اپنی مرضی سے، دفتر یا مالک کی کسی مداخلت کے بغیر، خالی کر دیا ہے۔`,
+      `اور میں عہد کرتا ہوں کہ یونٹ سے متعلق تمام واجبات — کرایہ، بجلی، پانی اور مرمت — خالی کرنے کی تاریخ (${vacateDate}) تک ادا اور طے کروں گا۔`,
+    ] };
+    if (lang === 'bn') return { title: 'ইউনিট খালি করার ঘোষণা ও বকেয়া পরিশোধের অঙ্গীকার', tenantSig: true, paras: [
+      `আমি ${d.tenantName}, ইউনিট ${d.unitName}, সম্পত্তি ${d.propertyName}-এর ভাড়াটিয়া, ঘোষণা করছি যে আমি নিজের ইচ্ছায়, অফিস বা মালিকের কোনো হস্তক্ষেপ ছাড়াই উক্ত ইউনিটটি খালি করে দিয়েছি।`,
+      `আমি খালি করার তারিখ (${vacateDate}) পর্যন্ত ইউনিট সংক্রান্ত সমস্ত বকেয়া — ভাড়া, বিদ্যুৎ, পানি ও রক্ষণাবেক্ষণ — পরিশোধ ও নিষ্পত্তি করার অঙ্গীকার করছি।`,
+    ] };
+    return { title: 'إقرار إخلاء وحدة وتعهد بسداد المستحقات', tenantSig: true, paras: [
+      `أقر أنا ${d.tenantName}، مستأجر وحدة ${d.unitName} بالعقار ${d.propertyName}${locAr ? `، الكائنة ب${locAr}` : ''}، بأنني قمت بإخلاء الوحدة المشار إليها برغبة مني دون تدخل من المكتب أو المالك.`,
+      `وأتعهد بسداد وتصفية كافة المستحقات المتعلقة بالوحدة من إيجار أو كهرباء أو مياه أو صيانة حتى تاريخ الإخلاء (${vacateDate}).`,
+    ] };
+  }
   if (type === 'renewal') {
     // قالب عبده: نهاية الإيجار + زيادة سنوية عند التجديد + عقد إلكتروني + ختم وتوقيع
     if (lang === 'en') return { title: 'Notice of Lease End and Renewal Terms', stampRow: true, paras: [
@@ -1073,24 +1099,28 @@ function ltDateIso(dateId, p) {
 }
 function unformatNum(s) { return String(s || '').replace(/[^\d.]/g, ''); }
 let editingLetterId = null;
-function letterForm(contractId, editRow) {
-  const c = CACHE.contracts.find((x) => x.id === Number(contractId));
-  if (!c) return;
-  const today = todayStr();
+function letterForm(contractId, editRow, forceManual) {
+  const c = contractId ? CACHE.contracts.find((x) => x.id === Number(contractId)) : null;
   let ed = {};
   if (editRow) { try { ed = JSON.parse(editRow.data || '{}'); } catch (e) { ed = {}; } }
+  // تحديث 76: إخلاء الطرف يقبل إدخالاً يدوياً بلا عقد (من تبويب الخطابات أو باختيار الوضع اليدوي)
+  const manualCapable = !!c || !!forceManual || (editRow && editRow.type === 'clearance');
+  if (!c && !manualCapable) return;
+  const manual0 = !!forceManual || ed.manual === '1' || !c;
+  const today = todayStr();
   editingLetterId = editRow ? editRow.id : null;
-  const type0 = editRow ? editRow.type : 'renewal';
+  const type0 = editRow ? editRow.type : (c ? 'renewal' : 'clearance');
   const langs0 = editRow ? String(editRow.lang2 || '').split(',') : [];
   const sel = (v) => (type0 === v ? ' selected' : '');
   const chk = (l) => (langs0.includes(l) ? ' checked' : '');
   const disp = (t) => (type0 === t ? '' : ' class="hidden"');
-  openModal(`📄 ${editRow ? `تعديل خطاب رقم ${editRow.id}` : `خطاب للمستأجر: ${esc(c.tenant_name)}`}`, `
-    <p class="muted">خطاب رسمي للمستأجر — الوحدة ${esc(c.unit_name)} · ${esc(c.property_name)} · قيمة العقد الحالية: ${money(c.rent_amount)} سنوياً</p>
+  openModal(`📄 ${editRow ? `تعديل خطاب رقم ${editRow.id}` : (c ? `خطاب للمستأجر: ${esc(c.tenant_name)}` : 'إخلاء طرف — إدخال يدوي')}`, `
+    ${c ? `<p class="muted">خطاب رسمي للمستأجر — الوحدة ${esc(c.unit_name)} · ${esc(c.property_name)} · قيمة العقد الحالية: ${money(c.rent_amount)} سنوياً</p>` : '<p class="muted">إقرار إخلاء طرف لمستأجر غير مسجل بعقد في البرنامج — اكتب بياناته يدوياً وستُحفظ مع الخطاب.</p>'}
     <label>نوع الخطاب<select id="ltType">
-      <option value="renewal"${sel('renewal')}>نهاية الإيجار وزيادة عند التجديد</option>
-      <option value="increase"${sel('increase')}>زيادة القيمة الإيجارية</option>
-      <option value="eviction"${sel('eviction')}>إخلاء الوحدة</option>
+      <option value="renewal"${sel('renewal')}${c ? '' : ' disabled'}>نهاية الإيجار وزيادة عند التجديد</option>
+      <option value="increase"${sel('increase')}${c ? '' : ' disabled'}>زيادة القيمة الإيجارية</option>
+      <option value="eviction"${sel('eviction')}${c ? '' : ' disabled'}>إخلاء الوحدة</option>
+      <option value="clearance"${sel('clearance')}>إخلاء طرف — إقرار المستأجر</option>
     </select></label>
     <label>تقويم إدخال التواريخ<select id="ltCal">
       <option value="gregorian" selected>ميلادي</option>
@@ -1098,7 +1128,7 @@ function letterForm(contractId, editRow) {
     </select></label>
     <p class="muted" style="margin:-4px 0 10px">تقدر تدخل التاريخ هجري أو ميلادي — والخطاب بيطبع التاريخ بالتقويمين معاً دائماً.</p>
     <div id="ltRenewal"${disp('renewal')}>
-      <label>تاريخ نهاية الإيجار<input id="ltEnd" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.endDate) : (c.end_date || today))}"><span id="ltEndH" style="display:none;gap:4px;align-items:center"><input id="ltEndHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltEndHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltEndHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
+      <label>تاريخ نهاية الإيجار<input id="ltEnd" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.endDate) : ((c && c.end_date) || today))}"><span id="ltEndH" style="display:none;gap:4px;align-items:center"><input id="ltEndHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltEndHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltEndHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
       <label>قيمة الإيجار السنوية الجديدة (${esc(CUR.label)})<input id="ltNewR" type="number" min="0" step="any" placeholder="مثال: 120000" value="${esc(editRow ? unformatNum(ed.newAmount) : '')}"></label>
     </div>
     <div id="ltIncrease"${disp('increase')}>
@@ -1106,7 +1136,7 @@ function letterForm(contractId, editRow) {
       <label>اعتباراً من تاريخ<input id="ltFrom" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.effDate) : today)}"><span id="ltFromH" style="display:none;gap:4px;align-items:center"><input id="ltFromHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltFromHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltFromHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
     </div>
     <div id="ltEviction"${disp('eviction')}>
-      <label>تاريخ الإخلاء (آخر موعد)<input id="ltDate" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.vacateDate) : (c.end_date || addMonthsStr(today, 1)))}"><span id="ltDateH" style="display:none;gap:4px;align-items:center"><input id="ltDateHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltDateHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltDateHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
+      <label>تاريخ الإخلاء (آخر موعد)<input id="ltDate" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.vacateDate) : ((c && c.end_date) || addMonthsStr(today, 1)))}"><span id="ltDateH" style="display:none;gap:4px;align-items:center"><input id="ltDateHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltDateHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltDateHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
       <label>سبب الإخلاء<select id="ltReason">
         ${Object.entries(LETTER_REASONS).map(([k, v]) => `<option value="${k}"${editRow && ed.reasonKey === k ? ' selected' : ''}>${esc(v.ar)}</option>`).join('')}
       </select></label>
@@ -1114,8 +1144,24 @@ function letterForm(contractId, editRow) {
         <option value="">— استخدام التاريخ اللي فوق —</option>
         ${[30, 60, 90].map((n) => `<option value="${n}"${editRow && String(ed.graceDays) === String(n) ? ' selected' : ''}>مهلة ${n} يوم من اليوم</option>`).join('')}
       </select></label>
-      <p class="muted" style="margin:-4px 0 10px">المتأخرات الحالية على هذا العقد: <strong>${money(c.arrears || 0)}</strong> — هتظهر في الخطاب تلقائياً لو سبب الإخلاء هو التأخر في السداد.</p>
-      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ltHandover" style="width:auto"${editRow ? (ed.handover === '1' ? ' checked' : '') : ' checked'}> إضافة بند التسليم والتصفية (المفاتيح + عدادات الكهرباء والمياه + تصفية التأمين)</label>
+      <p class="muted" style="margin:-4px 0 10px">المتأخرات الحالية على هذا العقد: <strong>${money((c && c.arrears) || 0)}</strong> — هتظهر في الخطاب تلقائياً لو سبب الإخلاء هو التأخر في السداد.</p>
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ltHandover" style="width:auto"${editRow ? (ed.handover === '1' ? ' checked' : '') : ' checked'}> إضافة بند التسليم والتصفية (المفاتيح + عدادات الكهرباء والمياه)</label>
+    </div>
+    <div id="ltClearance"${disp('clearance')}>
+      <label>مصدر البيانات</label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin:4px 0 10px">
+        <label style="display:flex;gap:6px;align-items:center"><input type="radio" name="ltClrMode" id="ltClrModeContract" style="width:auto"${manual0 ? '' : ' checked'}${c ? '' : ' disabled'}> من العقد المسجل</label>
+        <label style="display:flex;gap:6px;align-items:center"><input type="radio" name="ltClrMode" id="ltClrModeManual" style="width:auto"${manual0 ? ' checked' : ''}> إدخال يدوي (المستأجر مالوش عقد)</label>
+      </div>
+      <div id="ltManualFields"${manual0 ? '' : ' class="hidden"'}>
+        <label>اسم المستأجر<input id="ltMName" type="text" placeholder="الاسم كما سيظهر في الإقرار" value="${esc(editRow ? (ed.tenantName || '') : '')}"></label>
+        <label>الوحدة<input id="ltMUnit" type="text" placeholder="مثال: شقة 3" value="${esc(editRow ? (ed.unitName || '') : '')}"></label>
+        <label>العقار<input id="ltMProp" type="text" placeholder="مثال: عمارة النور" value="${esc(editRow ? (ed.propertyName || '') : '')}"></label>
+      </div>
+      <label>المنطقة<input id="ltArea" type="text" placeholder="مثال: الشميسي" value="${esc(editRow ? (ed.area || '') : '')}"></label>
+      <label>الحي<input id="ltDistrict" type="text" placeholder="مثال: حي البديعة" value="${esc(editRow ? (ed.district || '') : '')}"></label>
+      <label>تاريخ الإخلاء<input id="ltClrDate" type="date" value="${esc(editRow ? ddmmyyyyToIso(ed.vacateDate) : today)}"><span id="ltClrDateH" style="display:none;gap:4px;align-items:center"><input id="ltClrDateHd" type="number" min="1" max="30" placeholder="اليوم" style="width:70px"><select id="ltClrDateHm">${HIJRI_MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select><input id="ltClrDateHy" type="number" min="1300" max="1600" placeholder="السنة" style="width:90px"></span></label>
+      <p class="muted" style="margin:-4px 0 10px">إقرار يوقّعه المستأجر نفسه: أخلى برغبته دون تدخل من المكتب أو المالك، ويتعهد بسداد وتصفية كافة المستحقات حتى تاريخ الإخلاء.</p>
     </div>
     <label>لغات إضافية مع العربية (تقدر تختار أكتر من لغة)</label>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin:4px 0 10px">
@@ -1124,7 +1170,7 @@ function letterForm(contractId, editRow) {
       <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ltLangBn" style="width:auto"${chk('bn')}> বাংলা (بنغالي)</label>
     </div>
     <div class="form-actions">
-      <button class="btn primary" onclick="showLetter(${c.id})">${editRow ? 'حفظ التعديل وعرض الخطاب' : 'عرض الخطاب وحفظه'}</button>
+      <button class="btn primary" onclick="showLetter(${c ? c.id : 'null'})">${editRow ? 'حفظ التعديل وعرض الخطاب' : 'عرض الخطاب وحفظه'}</button>
     </div>
     <p class="muted" style="font-size:12px">${editRow ? 'التعديل هيتخزن على نفس الخطاب — مش هيتعمل خطاب جديد.' : 'يُحفظ الخطاب تلقائياً عند عرضه — تجده في تبويب «الخطابات».'}</p>`);
   $('#ltType').addEventListener('change', (e) => {
@@ -1132,7 +1178,14 @@ function letterForm(contractId, editRow) {
     $('#ltRenewal').classList.toggle('hidden', v !== 'renewal');
     $('#ltIncrease').classList.toggle('hidden', v !== 'increase');
     $('#ltEviction').classList.toggle('hidden', v !== 'eviction');
+    $('#ltClearance').classList.toggle('hidden', v !== 'clearance');
   });
+  // تحديث 76: تبديل وضع إخلاء الطرف (من العقد / يدوي) يظهر أو يخفي حقول الإدخال اليدوي
+  const clrModeSync = () => { const m = document.getElementById('ltClrModeManual'); const f = document.getElementById('ltManualFields'); if (m && f) f.classList.toggle('hidden', !m.checked); };
+  const clrC = document.getElementById('ltClrModeContract'), clrM = document.getElementById('ltClrModeManual');
+  if (clrC) clrC.addEventListener('change', clrModeSync);
+  if (clrM) clrM.addEventListener('change', clrModeSync);
+  clrModeSync();
   // تحديث 73: اختيار مهلة بالأيام يملأ تاريخ الإخلاء تلقائياً (ميلادي وهجري معاً)
   const ltGraceEl = document.getElementById('ltGrace');
   if (ltGraceEl) ltGraceEl.addEventListener('change', () => {
@@ -1146,7 +1199,7 @@ function letterForm(contractId, editRow) {
     if (hd && hm && hy) { hd.value = hp.d; hm.value = hp.m; hy.value = hp.y; }
   });
   // تقويم إدخال التواريخ: التبديل بين الميلادي والهجري مع مزامنة القيم بينهما
-  const ltPairs = [['ltEnd', 'ltEnd'], ['ltFrom', 'ltFrom'], ['ltDate', 'ltDate']];
+  const ltPairs = [['ltEnd', 'ltEnd'], ['ltFrom', 'ltFrom'], ['ltDate', 'ltDate'], ['ltClrDate', 'ltClrDate']];
   const ltSyncH = (dateId, p) => { const iso = document.getElementById(dateId).value; if (!iso) return; const hp = isoToHijriParts(iso); document.getElementById(p + 'Hd').value = hp.d; document.getElementById(p + 'Hm').value = hp.m; document.getElementById(p + 'Hy').value = hp.y; };
   const ltSyncG = (dateId, p) => { const iso = hijriToIso(document.getElementById(p + 'Hy').value, document.getElementById(p + 'Hm').value, document.getElementById(p + 'Hd').value); if (iso) document.getElementById(dateId).value = iso; };
   $('#ltCal').addEventListener('change', (e) => {
@@ -1165,7 +1218,9 @@ function renderLetterDoc(type, lang2Csv, d, s) {
     const L = letterText(lang, type, d);
     const dir = (lang === 'en' || lang === 'bn') ? 'ltr' : 'rtl';
     const align = dir === 'ltr' ? 'left' : 'right';
-    const footer = L.stampRow
+    const footer = L.tenantSig
+      ? `<div class="letter-stamp-row"><div>${esc(LETTER_TENANT_SIG_LABEL[lang] || LETTER_TENANT_SIG_LABEL.ar)}: ____________</div><div>${esc(LETTER_DATE_LABEL[lang] || LETTER_DATE_LABEL.ar)}: ____________</div></div>`
+      : L.stampRow
       ? `<div class="letter-stamp-row"><div>${esc(LETTER_STAMP_LABEL[lang] || LETTER_STAMP_LABEL.ar)}: ____________</div><div>${esc(LETTER_SIGN_LABEL[lang] || LETTER_SIGN_LABEL.ar)}: ____________</div></div>`
       : `<div class="letter-sig">${esc(LETTER_SIG[lang] || LETTER_SIG.ar)}${s.company_name ? `<br>${esc(s.company_name)}` : ''}<br>${esc(LETTER_SIGN_LABEL[lang] || LETTER_SIGN_LABEL.ar)}: ____________</div>`;
     return `<div dir="${dir}" style="text-align:${align}">
@@ -1184,47 +1239,56 @@ function renderLetterDoc(type, lang2Csv, d, s) {
   </div>`;
 }
 function letterPlainText(type, lang2Csv, d, s) {
-  const plain = (lang) => { const L = letterText(lang, type, d); return `${L.title}\n\n${L.paras.join('\n\n')}\n${LETTER_SIG[lang] || LETTER_SIG.ar}${s.company_name ? ` — ${s.company_name}` : ''}`; };
+  const plain = (lang) => { const L = letterText(lang, type, d); const tail = L.tenantSig ? `${LETTER_TENANT_SIG_LABEL[lang] || LETTER_TENANT_SIG_LABEL.ar}: ____________   ${LETTER_DATE_LABEL[lang] || LETTER_DATE_LABEL.ar}: ____________` : `${LETTER_SIG[lang] || LETTER_SIG.ar}${s.company_name ? ` — ${s.company_name}` : ''}`; return `${L.title}\n\n${L.paras.join('\n\n')}\n${tail}`; };
   const extras = String(lang2Csv || '').split(',').map((x) => x.trim()).filter(Boolean);
   return [plain('ar'), ...extras.map((l) => plain(l))].join('\n\n————————\n\n');
 }
 let lastSavedLetterKey = '';
 async function showLetter(contractId) {
-  const c = CACHE.contracts.find((x) => x.id === Number(contractId));
-  if (!c) return;
-  const t = CACHE.tenants.find((x) => x.id === c.tenant_id) || {};
-  const s = CACHE.settings || {};
   const type = $('#ltType').value;
+  // تحديث 76: إخلاء الطرف بالوضع اليدوي لا يحتاج عقداً — البيانات من الحقول اليدوية
+  const manual = type === 'clearance' && document.getElementById('ltClrModeManual') && document.getElementById('ltClrModeManual').checked;
+  const c = manual ? null : CACHE.contracts.find((x) => x.id === Number(contractId));
+  if (!manual && !c) return;
+  if (manual && !document.getElementById('ltMName').value.trim()) { alert('من فضلك اكتب اسم المستأجر أولاً'); return; }
+  const t = c ? (CACHE.tenants.find((x) => x.id === c.tenant_id) || {}) : {};
+  const s = CACHE.settings || {};
   const langs = [];
   if ($('#ltLangEn').checked) langs.push('en');
   if ($('#ltLangUr').checked) langs.push('ur');
   if ($('#ltLangBn').checked) langs.push('bn');
   const lang2 = langs.join(',');
   const fmtN = (n) => Number(n || 0).toLocaleString('en-US');
-  const prop = (CACHE.properties || []).find((p) => p.id === c.property_id) || {};
+  const prop = c ? ((CACHE.properties || []).find((p) => p.id === c.property_id) || {}) : {};
   const newVal = type === 'renewal' ? $('#ltNewR').value : (type === 'increase' ? $('#ltNew').value : '');
   if ((type === 'renewal' || type === 'increase') && !(Number(newVal) > 0)) { alert('من فضلك أدخل قيمة الإيجار السنوية الجديدة أولاً'); return; }
   const d = {
-    tenantName: c.tenant_name, unitName: c.unit_name, propertyName: c.property_name,
+    tenantName: manual ? document.getElementById('ltMName').value.trim() : c.tenant_name,
+    unitName: manual ? document.getElementById('ltMUnit').value.trim() : c.unit_name,
+    propertyName: manual ? document.getElementById('ltMProp').value.trim() : c.property_name,
     ownerName: prop.owner_name || '', company: s.company_name || 'سليمان الحصين للعقارات',
-    cycle: c.cycle, oldAmount: fmtN(c.rent_amount), newAmount: fmtN(newVal),
+    cycle: c ? c.cycle : '', oldAmount: fmtN(c ? c.rent_amount : 0), newAmount: fmtN(newVal),
     endDate: fmtGregFull(ltDateIso('ltEnd', 'ltEnd')),
     effDate: fmtGregFull(ltDateIso('ltFrom', 'ltFrom')),
-    vacateDate: fmtGregFull(ltDateIso('ltDate', 'ltDate')),
+    vacateDate: type === 'clearance' ? fmtGregFull(ltDateIso('ltClrDate', 'ltClrDate')) : fmtGregFull(ltDateIso('ltDate', 'ltDate')),
     reasonKey: $('#ltReason') ? $('#ltReason').value : 'other',
     // تحديث 73: لقطة المتأخرات وبند التسليم ومهلة الإخلاء لخطاب الإخلاء
-    arrears: (type === 'eviction' && $('#ltReason') && $('#ltReason').value === 'late' && Number(c.arrears) > 0) ? fmtN(c.arrears) : '',
+    arrears: (type === 'eviction' && $('#ltReason') && $('#ltReason').value === 'late' && c && Number(c.arrears) > 0) ? fmtN(c.arrears) : '',
     handover: (type === 'eviction' && document.getElementById('ltHandover') && document.getElementById('ltHandover').checked) ? '1' : '',
     graceDays: type === 'eviction' ? (document.getElementById('ltGrace') ? document.getElementById('ltGrace').value : '') : '',
+    // تحديث 76: بيانات إخلاء الطرف — الوضع اليدوي والمنطقة والحي
+    manual: manual ? '1' : '',
+    area: type === 'clearance' ? document.getElementById('ltArea').value.trim() : '',
+    district: type === 'clearance' ? document.getElementById('ltDistrict').value.trim() : '',
   };
   const doc = renderLetterDoc(type, lang2, d, s);
   const waText = letterPlainText(type, lang2, d, s);
   // الحفظ التلقائي (أو تحديث الخطاب الجاري تعديله) — طلب عبده: حفظ الخطابات للرجوع لها
-  const key = `${editingLetterId || 'new'}|${c.id}|${type}|${lang2}|${JSON.stringify(d)}`;
+  const key = `${editingLetterId || 'new'}|${c ? c.id : 'manual'}|${type}|${lang2}|${JSON.stringify(d)}`;
   let savedNote = '';
   if (key !== lastSavedLetterKey) {
     try {
-      const payload = { tenant_id: c.tenant_id, contract_id: c.id, type, lang2, data: JSON.stringify(d), text: waText };
+      const payload = { tenant_id: c ? c.tenant_id : null, contract_id: c ? c.id : null, type, lang2, data: JSON.stringify(d), text: waText };
       if (editingLetterId) {
         await api(`/api/letters/${editingLetterId}`, { method: 'PUT', body: JSON.stringify(payload) });
         savedNote = `<p class="muted" style="font-size:12px">✅ تم تحديث الخطاب رقم ${editingLetterId} — تجده في تبويب «الخطابات».</p>`;
@@ -1246,7 +1310,7 @@ async function showLetter(contractId) {
     } catch (e) { savedNote = '<p class="error" style="font-size:12px">تعذّر حفظ الخطاب (ظهر لك للطباعة والإرسال فقط).</p>'; }
   }
   const waBtn = `<button class="btn" onclick="shareDocPdf()">📤 إرسال الخطاب PDF واتساب</button>`;
-  setDocPdf(`خطاب-${c.tenant_name || 'مستأجر'}.pdf`, t.phone || '');
+  setDocPdf(`خطاب-${(c ? c.tenant_name : d.tenantName) || 'مستأجر'}.pdf`, t.phone || '');
   openModal(LETTER_TYPE_LABELS[type] || 'خطاب للمستأجر', doc + `
     <div class="form-actions" style="margin-top:12px"><button class="btn primary" onclick="printStatement()">🖨️ معاينة وطباعة</button>${waBtn}</div>${savedNote}`);
   $('#printArea').innerHTML = doc;
@@ -1259,19 +1323,20 @@ async function viewLetters() {
   const sorted = [...rows].sort((a, b) => b.id - a.id);
   const counts = { active: sorted.filter((r) => !r.archived).length, archived: sorted.filter((r) => r.archived).length, all: sorted.length };
   const visible = sorted.filter((r) => LETTERS_FILTER === 'all' ? true : LETTERS_FILTER === 'archived' ? !!r.archived : !r.archived);
-  const tenantNameOf = (id) => { const x = (CACHE.tenants || []).find((y) => y.id === Number(id)); return x ? x.name : ''; };
-  const unitLabelOf = (cid) => { const cc = (CACHE.contracts || []).find((x) => x.id === Number(cid)); return cc ? `${cc.unit_name} — ${cc.property_name}` : ''; };
+  const dataOf = (r) => { try { return JSON.parse(r.data || '{}'); } catch (e) { return {}; } };
+  const tenantNameOf = (r) => { const x = (CACHE.tenants || []).find((y) => y.id === Number(r.tenant_id)); return x ? x.name : (dataOf(r).tenantName || ''); };
+  const unitLabelOf = (r) => { const cc = (CACHE.contracts || []).find((x) => x.id === Number(r.contract_id)); if (cc) return `${cc.unit_name} — ${cc.property_name}`; const dd = dataOf(r); return dd.unitName ? `${dd.unitName} — ${dd.propertyName || ''}` : ''; };
   const langLabel = (csv) => String(csv || '').split(',').filter(Boolean).map((l) => ({ en: 'English', ur: 'اردو', bn: 'বাংলা' })[l] || l).join(' + ');
   const chip = (key, label) => `<button class="btn small ${LETTERS_FILTER === key ? 'primary' : ''}" onclick="LETTERS_FILTER='${key}';viewLetters()">${label} (${counts[key]})</button>`;
   main().innerHTML = `
     <div class="section">
-      <div class="section-head"><h3>📄 الخطابات المحفوظة</h3></div>
+      <div class="section-head"><h3>📄 الخطابات المحفوظة</h3><button class="btn primary" onclick="letterForm(null, null, true)">+ إخلاء طرف (إدخال يدوي)</button></div>
       <p class="muted">كل خطاب تعرضه من ملف مستأجر أو من العقود يُحفظ هنا تلقائياً — تقدر تعدّله أو تأرشفه أو تحذفه وترجع له في أي وقت.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">${chip('active', 'النشطة')}${chip('archived', 'المؤرشفة')}${chip('all', 'الكل')}</div>
       ${visible.length ? `<div class="table-wrap"><table><tr><th>رقم</th><th>التاريخ</th><th>المستأجر</th><th>الوحدة</th><th>النوع</th><th>لغات إضافية</th><th></th></tr>
         ${visible.map((r) => `<tr${r.archived ? ' style="opacity:.65"' : ''}><td>${r.id}</td><td>${esc(fmtDateTime(r.created_at))}</td>
-          <td><strong>${esc(tenantNameOf(r.tenant_id))}</strong>${r.archived ? ' <span class="badge">مؤرشف</span>' : ''}</td>
-          <td>${esc(unitLabelOf(r.contract_id))}</td>
+          <td><strong>${esc(tenantNameOf(r))}</strong>${r.archived ? ' <span class="badge">مؤرشف</span>' : ''}</td>
+          <td>${esc(unitLabelOf(r))}</td>
           <td>${esc(LETTER_TYPE_LABELS[r.type] || r.type)}</td>
           <td>${r.lang2 ? esc(langLabel(r.lang2)) : '—'}</td>
           <td style="white-space:nowrap"><button class="btn small" onclick="showSavedLetter(${r.id})">عرض</button>
