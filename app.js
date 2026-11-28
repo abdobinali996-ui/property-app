@@ -948,10 +948,10 @@ function evictExtras(lang, d) {
   }
   if (d.handover === '1') {
     out.push({
-      ar: 'وعند الإخلاء يرجى تسليم الوحدة والمفاتيح إلى المكتب بحالتها، مع تسوية قراءات عدادات الكهرباء والمياه حتى تاريخ التسليم، وستتم تصفية مبلغ التأمين المحتجَز بعد التسليم وفق الشروط المتفق عليها.',
-      en: 'Upon vacating, please hand over the unit and its keys to the office in their condition, with electricity and water meter readings settled up to the handover date; the held insurance amount will then be settled after handover in accordance with the agreed terms.',
-      ur: 'خالی کرتے وقت براہ کرم یونٹ اور اس کی چابیاں دفتر کے حوالے کریں، اور حوالگی کی تاریخ تک بجلی اور پانی کے میٹروں کی ریڈنگ کا تصفیہ کریں؛ اس کے بعد رکھا گیا بیمہ کی رقم طے شدہ شرائط کے مطابق طے کی جائے گی۔',
-      bn: 'খালি করার সময় অনুগ্রহ করে ইউনিট ও এর চাবি অফিসে হস্তান্তর করুন এবং হস্তান্তরের তারিখ পর্যন্ত বিদ্যুৎ ও পানির মিটার রিডিং নিষ্পত্তি করুন; এরপর আটকে রাখা বীমা অর্থ সম্মত শর্ত অনুযায়ী নিষ্পত্তি করা হবে।',
+      ar: 'وعند الإخلاء يرجى تسليم الوحدة والمفاتيح إلى المكتب بحالتها، مع تسوية قراءات عدادات الكهرباء والمياه حتى تاريخ التسليم.',
+      en: 'Upon vacating, please hand over the unit and its keys to the office in their condition, with electricity and water meter readings settled up to the handover date.',
+      ur: 'خالی کرتے وقت براہ کرم یونٹ اور اس کی چابیاں دفتر کے حوالے کریں، اور حوالگی کی تاریخ تک بجلی اور پانی کے میٹروں کی ریڈنگ کا تصفیہ کریں۔',
+      bn: 'খালি করার সময় অনুগ্রহ করে ইউনিট ও এর চাবি অফিসে হস্তান্তর করুন এবং হস্তান্তরের তারিখ পর্যন্ত বিদ্যুৎ ও পানির মিটার রিডিং নিষ্পত্তি করুন।',
     }[lang] || '');
   }
   return out.filter(Boolean);
