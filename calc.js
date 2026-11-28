@@ -181,12 +181,15 @@ function periodStarts(contract, until) {
     }
     return starts;
   }
-  let cur = start;
-  let guard = 0;
-  while (cur <= limit && guard < 1200) {
-    starts.push(new Date(cur));
-    cur = addMonths(cur, step);
-    guard++;
+  // تحديث 74: خطوات مثبّتة من تاريخ البداية نفسه (start + i*step) مثل فرع
+  // الهجري — الخطو التراكمي كان ينحرف بعد فبراير للعقود التي تبدأ أيام
+  // 29–31 (29 → 28 ويبقى 28) فينتج قسطاً زائداً (13 بدل 12) ويصغّر مبلغ كل قسط
+  let i = 0;
+  while (i < 1200) {
+    const cur = addMonths(start, i * step);
+    if (!cur || cur > limit) break;
+    starts.push(cur);
+    i++;
   }
   return starts;
 }
