@@ -1218,6 +1218,9 @@ function renderLetterDoc(type, lang2Csv, d, s) {
     const L = letterText(lang, type, d);
     const dir = (lang === 'en' || lang === 'bn') ? 'ltr' : 'rtl';
     const align = dir === 'ltr' ? 'left' : 'right';
+    // تحديث 77 (بطلب عبده): في إخلاء الطرف تظهر قيم الاسم والوحدة والعقار بخط عريض مميز
+    const boldVals = type === 'clearance' ? [d.tenantName, d.unitName, d.propertyName].map((v) => String(v || '').trim()).filter(Boolean).sort((a, b) => b.length - a.length) : [];
+    const paraHtml = (p) => { let h = esc(p); for (const v of boldVals) h = h.split(esc(v)).join(`<strong>${esc(v)}</strong>`); return h; };
     const footer = L.tenantSig
       ? `<div class="letter-stamp-row"><div>${esc(LETTER_TENANT_SIG_LABEL[lang] || LETTER_TENANT_SIG_LABEL.ar)}: ____________</div><div>${esc(LETTER_DATE_LABEL[lang] || LETTER_DATE_LABEL.ar)}: ____________</div></div>`
       : L.stampRow
@@ -1225,7 +1228,7 @@ function renderLetterDoc(type, lang2Csv, d, s) {
       : `<div class="letter-sig">${esc(LETTER_SIG[lang] || LETTER_SIG.ar)}${s.company_name ? `<br>${esc(s.company_name)}` : ''}<br>${esc(LETTER_SIGN_LABEL[lang] || LETTER_SIGN_LABEL.ar)}: ____________</div>`;
     return `<div dir="${dir}" style="text-align:${align}">
       <h2>${esc(L.title)}</h2>
-      ${L.paras.map((p) => `<p>${esc(p)}</p>`).join('')}
+      ${L.paras.map((p) => `<p>${paraHtml(p)}</p>`).join('')}
       ${footer}
     </div>`;
   };
