@@ -1439,8 +1439,10 @@ function addMonthsStr(dateStr, n) {
 function periodCountStr(startStr, endStr, cycle) {
   if (!startStr || !endStr || endStr < startStr) return 0;
   const step = CYCLE_MONTHS_F[cycle] || 1;
-  let cur = startStr, count = 0;
-  while (cur <= endStr && count < 1200) { count++; cur = addMonthsStr(cur, step); }
+  // تحديث 74: عدّ بخطوات مثبّتة من البداية (لا خطو تراكمي) — حتى لا ينحرف
+  // العدد بعد فبراير للعقود التي تبدأ أيام 29–31 (كانت تطلع 13 بدل 12)
+  let count = 0;
+  while (count < 1200) { if (addMonthsStr(startStr, count * step) > endStr) break; count++; }
   return count;
 }
 
@@ -2041,8 +2043,9 @@ function defaultPeriodClient(contract, paymentDateStr) {
     let i = 0;
     while (i < 1200) { const cur = addMonthsHijriStr(contract.start_date, i * step); if (cur > limit) break; starts.push(cur); i++; }
   } else {
-    let cur = contract.start_date;
-    while (cur <= limit && starts.length < 1200) { starts.push(cur); cur = addMonthsStr(cur, step); }
+    // تحديث 74: خطوات مثبّتة من البداية مثل فرع الهجري (لا خطو تراكمي منحنٍ)
+    let i = 0;
+    while (i < 1200) { const cur = addMonthsStr(contract.start_date, i * step); if (cur > limit) break; starts.push(cur); i++; }
   }
   if (!starts.length) starts.push(contract.start_date);
   let idx = 0;
@@ -2054,7 +2057,7 @@ function defaultPeriodClient(contract, paymentDateStr) {
   if (contract.calendar === 'hijri') {
     to = addDaysStr(addMonthsHijriStr(contract.start_date, (idx + 1) * step), -1);
   } else {
-    to = addDaysStr(addMonthsStr(from, step), -1);
+    to = addDaysStr(addMonthsStr(contract.start_date, (idx + 1) * step), -1);
   }
   if (contract.end_date && to > contract.end_date) to = contract.end_date;
   return { period_from: from, period_to: to };
